@@ -6,6 +6,14 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <title>乘和除的關係</title>
   <link rel="stylesheet" href="styles.css" />
+  <script>
+    (function () {
+      try {
+        var c = new URLSearchParams(location.search).get("c") || "";
+        if (/^\d{4}$/.test(c)) document.documentElement.classList.add("prejoin");
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
   <div id="screen-landing" class="screen active">
@@ -25,7 +33,7 @@
   <div id="screen-numbers" class="screen">
     <div class="header">
       <h1>選擇你的學號</h1>
-      <p class="sub">請點選自己的學號（不用輸入姓名或班別）</p>
+      <p class="sub" id="numbers-sub">請點選自己的學號（不用輸入姓名或班別）</p>
     </div>
     <div class="card wide">
       <div class="num-grid" id="num-grid"></div>
@@ -156,6 +164,7 @@
       <p class="lead" id="room-status">準備中…</p>
       <div class="btn-row">
         <button class="btn btn-ghost" id="btn-room-regen" type="button">新編號</button>
+        <button class="btn btn-accent" id="btn-room-entry" type="button">顯示入場畫面</button>
         <button class="btn btn-primary" id="btn-room-enter" type="button">進入控制台</button>
       </div>
       <hr class="divider" />
@@ -166,6 +175,32 @@
       </div>
       <div class="btn-row">
         <button class="btn btn-ghost" id="btn-room-home" type="button">返回主頁</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-entry" class="screen entry-screen">
+    <div class="entry-shell">
+      <div class="header">
+        <h1>課堂入場</h1>
+        <p class="sub entry-instruction" id="entry-instruction">用 iPad 相機掃呢個 QR code，再揀自己嘅學號</p>
+      </div>
+      <div class="entry-layout">
+        <div class="entry-qr-wrap">
+          <canvas id="entry-qr-canvas" width="800" height="800" aria-label="課堂入場 QR code"></canvas>
+          <p class="entry-qr-fallback hidden" id="entry-qr-fallback">QR code 未能產生，請用下面的課堂編號或網址加入。</p>
+        </div>
+        <div class="entry-meta">
+          <p class="entry-label">課堂編號</p>
+          <div class="room-code-big entry-code" id="entry-code-display">----</div>
+          <p class="entry-label">學生網址（掃唔到時可打開）</p>
+          <div class="entry-url" id="entry-url-display"></div>
+        </div>
+      </div>
+      <div class="btn-row entry-actions">
+        <button class="btn btn-primary" id="btn-entry-console" type="button">進入控制台</button>
+        <button class="btn btn-ghost" id="btn-entry-regen" type="button">新編號</button>
+        <button class="btn btn-ghost" id="btn-entry-setup" type="button">返回設定</button>
       </div>
     </div>
   </div>
@@ -192,6 +227,7 @@
       <button class="btn btn-primary" id="btn-next-q" type="button">進入下一題</button>
       <button class="btn btn-ghost" id="btn-prev-q" type="button">返回上一題</button>
       <button class="btn btn-soft" id="btn-reveal" type="button">顯示答案</button>
+      <button class="btn btn-ghost" id="btn-show-entry" type="button">顯示入場畫面</button>
       <button class="btn btn-accent" id="btn-demo" type="button">講解示範</button>
       <button class="btn btn-danger" id="btn-new-round" type="button">開新一輪</button>
     </div>
@@ -210,6 +246,7 @@
       </div>
       <div class="meta demo-toolbar">
         <div class="badge" id="demo-q-badge">第 1 題</div>
+        <button class="btn btn-accent" type="button" id="btn-demo-project" aria-pressed="false">投影示範</button>
         <button class="btn btn-soft" type="button" id="btn-demo-clear">清除重畫</button>
         <button class="btn btn-ghost" type="button" id="btn-demo-back">返回控制台</button>
       </div>
@@ -256,6 +293,7 @@
     </div>
   </div>
 
+  <script src="vendor/qrcode-generator.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

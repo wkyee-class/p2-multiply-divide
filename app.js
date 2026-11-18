@@ -24,6 +24,8 @@ const PUB_KEY = "demo";
 const SUB_KEY = "demo";
 const STORE_KEY = "p2-multiply-divide-v1";
 const ONLINE_STALE_MS = 90000;
+const PUBLIC_SITE_URL = "https://wkyee-class.github.io/p2-multiply-divide/";
+const CLASS_CODE_PARAM = "c";
 
 const SVGS = {
   apple: `<svg viewBox="0 0 120 130" aria-hidden="true">
@@ -85,7 +87,10 @@ const app = {
   presenceTimer: null,
   channel: null,
   syncFailCount: 0,
-  demoMode: false
+  demoMode: false,
+  demoProject: false,
+  pendingClassCode: "",
+  entryJoinUrl: ""
 };
 
 const SYNC_POLL_MS = 2500;
@@ -110,13 +115,18 @@ function showScreen(id) {
   document.querySelectorAll(".screen").forEach((el) => el.classList.toggle("active", el.id === id));
   document.body.classList.remove("mode-play", "mode-broadcast", "mode-inspect", "mode-demo", "drawing-lock");
   document.documentElement.classList.remove("drawing-lock");
-  if (id !== "screen-demo") app.demoMode = false;
+  if (id !== "screen-demo") {
+    app.demoMode = false;
+    app.demoProject = false;
+    document.body.classList.remove("demo-project");
+  }
   if (id === "screen-play") document.body.classList.add("mode-play");
   if (id === "screen-broadcast") document.body.classList.add("mode-broadcast");
   if (id === "screen-inspect") document.body.classList.add("mode-inspect");
   if (id === "screen-demo") {
     app.demoMode = true;
     document.body.classList.add("mode-demo");
+    document.body.classList.toggle("demo-project", !!app.demoProject);
   }
 }
 
@@ -457,9 +467,58 @@ function goHome() {
   app.cloud = null;
   app.pin = "";
   app.joinCode = "";
+  app.pendingClassCode = "";
   app.demoMode = false;
+  app.demoProject = false;
   app.syncFailCount = 0;
+  try { document.documentElement.classList.remove("prejoin"); } catch (e) {}
   showScreen("screen-landing");
+}
+
+function publicJoinUrl(code) {
+  // Always encode the public GitHub Pages URL so a projected QR works in class.
+  // Never use localhost / 127.0.0.1, even during local preview.
+  const base = PUBLIC_SITE_URL.endsWith("/") ? PUBLIC_SITE_URL : PUBLIC_SITE_URL + "/";
+  return base + "?" + CLASS_CODE_PARAM + "=" + encodeURIComponent(String(code));
+}
+
+function readClassCodeFromUrl() {
+  try {
+    const raw = new URLSearchParams(location.search).get(CLASS_CODE_PARAM) || "";
+    const parsed = normalizeClassCode(raw);
+    return parsed.ok ? parsed.code : "";
+  } catch (e) {
+    return "";
+  }
+}
+
+function clearClassCodeFromUrl() {
+  try {
+    const url = new URL(location.href);
+    if (!url.searchParams.has(CLASS_CODE_PARAM)) return;
+    url.searchParams.delete(CLASS_CODE_PARAM);
+    const qs = url.searchParams.toString();
+    history.replaceState({}, "", url.pathname + (qs ? "?" + qs : "") + url.hash);
+  } catch (e) {}
+}
+
+function openNumberGrid() {
+  renderNumGrid();
+  const sub = $("numbers-sub");
+  if (sub) {
+    sub.textContent = app.pendingClassCode
+      ? "已備好課堂，揀學號就可以加入（不用再輸入編號）"
+      : "請點選自己的學號（不用輸入姓名或班別）";
+  }
+  showScreen("screen-numbers");
+}
+
+function leaveNumberGrid() {
+  if (app.pendingClassCode) {
+    app.pendingClassCode = "";
+    clearClassCodeFromUrl();
+  }
+  goHome();
 }
 
 function renderNumGrid() {
@@ -478,6 +537,11 @@ function renderNumGrid() {
 function chooseNumber(n) {
   app.studentNo = n;
   app.role = "student";
+  if (app.pendingClassCode) {
+    app.joinCode = app.pendingClassCode;
+    studentJoinWithCode(app.pendingClassCode);
+    return;
+  }
   app.joinCode = "";
   $("join-student-label").textContent = "學號 " + n;
   $("join-code-display").textContent = "____";
@@ -516,8 +580,15 @@ function setPin(v) {
 
 function studentJoinClass() {
   $("join-error").textContent = "";
-  const parsed = normalizeClassCode(app.joinCode);
-  if (!parsed.ok) { $("join-error").textContent = parsed.error; return; }
+  studentJoinWithCode(app.joinCode, $("join-error"));
+}
+
+function studentJoinWithCode(code, errorEl) {
+  const parsed = normalizeClassCode(code);
+  if (!parsed.ok) {
+    if (errorEl) errorEl.textContent = parsed.error;
+    return false;
+  }
   // Never block entry on cloud history. Start with local or empty state and
   // sync in the background (any Wi-Fi / any iPad).
   const found = localRoomState(parsed.code);
@@ -525,6 +596,7 @@ function studentJoinClass() {
   app.syncLabel = "正在連接課堂…";
   adoptRoom(parsed.code, found, false);
   enterPlay(app.cloud.unlockedQuestion || 0);
+  return true;
 }
 
 function studentSolo() {
@@ -1162,10 +1234,10 @@ function submitPin() {
   $("room-code-display").textContent = app.roomCode;
   $("room-status").textContent = "已建立新課堂。可把編號投影給學生，或再按「新編號」。";
   $("teacher-rejoin-code").value = "";
-  showScreen("screen-room");
   saveRoomLocal(app.cloud);
   startSync();
   teacherPublishState();
+  showEntryScreen();
 }
 
 function regenRoom() {
@@ -1175,6 +1247,7 @@ function regenRoom() {
   $("room-status").textContent = "已換新編號。舊編號嘅課堂資料仍然保留，可用下面重開。";
   saveRoomLocal(app.cloud);
   teacherPublishState();
+  if ($("screen-entry") && $("screen-entry").classList.contains("active")) showEntryScreen();
 }
 
 async function rejoinRoom() {
@@ -1188,6 +1261,7 @@ async function rejoinRoom() {
   $("room-status").style.color = "";
   $("room-code-display").textContent = app.roomCode;
   $("room-status").textContent = "已重新開啟課堂 " + app.roomCode + "。";
+  showEntryScreen();
 }
 
 function updateRoomStatus() {
@@ -1195,6 +1269,60 @@ function updateRoomStatus() {
   const n = onlineStudents().length;
   $("room-code-display").textContent = app.cloud.code;
   $("room-status").textContent = "課堂已準備。而家在線學生：" + n + " 人。";
+}
+
+function showEntryScreen() {
+  if (!app.roomCode) return;
+  showScreen("screen-entry");
+  renderEntryScreen();
+}
+
+function renderEntryScreen() {
+  const code = app.roomCode;
+  const url = publicJoinUrl(code);
+  app.entryJoinUrl = url;
+  if ($("entry-code-display")) $("entry-code-display").textContent = code;
+  if ($("entry-url-display")) $("entry-url-display").textContent = url;
+  drawEntryQr(url);
+}
+
+function drawEntryQr(url) {
+  const canvas = $("entry-qr-canvas");
+  const fallback = $("entry-qr-fallback");
+  if (!canvas) return;
+  canvas.dataset.qrUrl = url;
+  const revealFallback = function () {
+    canvas.classList.add("hidden");
+    if (fallback) fallback.classList.remove("hidden");
+  };
+  try {
+    if (typeof qrcode !== "function") throw new Error("no-qr-lib");
+    const qr = qrcode(0, "Q");
+    qr.addData(url);
+    qr.make();
+    const count = qr.getModuleCount();
+    const margin = 2;
+    const scale = Math.max(8, Math.floor(800 / (count + margin * 2)));
+    const size = (count + margin * 2) * scale;
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("no-2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = "#3a2415";
+    for (let r = 0; r < count; r++) {
+      for (let c = 0; c < count; c++) {
+        if (qr.isDark(r, c)) {
+          ctx.fillRect((c + margin) * scale, (r + margin) * scale, scale, scale);
+        }
+      }
+    }
+    canvas.classList.remove("hidden");
+    if (fallback) fallback.classList.add("hidden");
+  } catch (e) {
+    revealFallback();
+  }
 }
 
 function enterConsole() {
@@ -1428,7 +1556,9 @@ function enterTeacherDemo() {
   app.active = { row: 0, col: 0 };
   app.checkResult = null;
   app.submitted = false;
+  app.demoProject = false;
   showScreen("screen-demo");
+  syncDemoProjectButton();
   renderTeacherDemo();
 }
 
@@ -1470,7 +1600,23 @@ function leaveTeacherDemo() {
   app.drag = null;
   app.equations = ROWS.map(() => ["", "", ""]);
   app.demoMode = false;
+  app.demoProject = false;
+  document.body.classList.remove("demo-project");
   enterConsole();
+}
+
+function syncDemoProjectButton() {
+  const btn = $("btn-demo-project");
+  if (!btn) return;
+  btn.textContent = app.demoProject ? "結束投影" : "投影示範";
+  btn.setAttribute("aria-pressed", app.demoProject ? "true" : "false");
+}
+
+function toggleDemoProject() {
+  app.demoProject = !app.demoProject;
+  document.body.classList.toggle("demo-project", app.demoProject);
+  syncDemoProjectButton();
+  requestAnimationFrame(() => renderLoops());
 }
 
 function exportData() {
@@ -1510,9 +1656,9 @@ function exportData() {
 
 /* ---------- wire events ---------- */
 function bind() {
-  $("btn-student").addEventListener("click", () => { renderNumGrid(); showScreen("screen-numbers"); });
+  $("btn-student").addEventListener("click", openNumberGrid);
   $("btn-teacher").addEventListener("click", goTeacherPin);
-  $("btn-numbers-back").addEventListener("click", goHome);
+  $("btn-numbers-back").addEventListener("click", leaveNumberGrid);
   $("btn-join-back").addEventListener("click", () => showScreen("screen-numbers"));
   $("btn-join-go").addEventListener("click", studentJoinClass);
   $("btn-join-skip").addEventListener("click", studentSolo);
@@ -1531,9 +1677,19 @@ function bind() {
   $("btn-pin-go").addEventListener("click", submitPin);
   $("btn-pin-back").addEventListener("click", goHome);
   $("btn-room-regen").addEventListener("click", regenRoom);
+  $("btn-room-entry").addEventListener("click", showEntryScreen);
   $("btn-room-enter").addEventListener("click", enterConsole);
   $("btn-room-rejoin").addEventListener("click", rejoinRoom);
   $("btn-room-home").addEventListener("click", goHome);
+  $("btn-entry-console").addEventListener("click", enterConsole);
+  $("btn-entry-regen").addEventListener("click", regenRoom);
+  $("btn-entry-setup").addEventListener("click", () => {
+    if (!app.cloud) return;
+    $("room-code-display").textContent = app.roomCode;
+    showScreen("screen-room");
+    updateRoomStatus();
+  });
+  $("btn-show-entry").addEventListener("click", showEntryScreen);
   $("btn-export").addEventListener("click", exportData);
   $("btn-console-home").addEventListener("click", goHome);
   $("teacher-online-pill").addEventListener("click", () => {
@@ -1545,6 +1701,7 @@ function bind() {
   $("btn-reveal").addEventListener("click", toggleReveal);
   $("btn-new-round").addEventListener("click", teacherNewRound);
   $("btn-demo").addEventListener("click", enterTeacherDemo);
+  $("btn-demo-project").addEventListener("click", toggleDemoProject);
   $("btn-demo-clear").addEventListener("click", clearTeacherDemo);
   $("btn-demo-back").addEventListener("click", leaveTeacherDemo);
   $("btn-broadcast").addEventListener("click", teacherBroadcast);
@@ -1564,6 +1721,7 @@ function bind() {
   window.addEventListener("touchmove", onTouchMove, { passive: false });
   window.addEventListener("resize", () => {
     if (isBoardScreenActive()) renderLoops();
+    if ($("screen-entry") && $("screen-entry").classList.contains("active")) renderEntryScreen();
   });
 
   window.addEventListener("keydown", (e) => {
@@ -1592,4 +1750,11 @@ function bind() {
 }
 
 bind();
-if (location.hash === "#teacher") goTeacherPin();
+const prefilledCode = readClassCodeFromUrl();
+if (prefilledCode) {
+  app.pendingClassCode = prefilledCode;
+  document.documentElement.classList.add("prejoin");
+  openNumberGrid();
+} else if (location.hash === "#teacher") {
+  goTeacherPin();
+}
