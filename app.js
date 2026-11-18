@@ -83,8 +83,15 @@ const app = {
   syncLabel: "尚未同步",
   pollTimer: null,
   presenceTimer: null,
-  channel: null
+  channel: null,
+  syncFailCount: 0,
+  demoMode: false
 };
+
+const SYNC_POLL_MS = 2500;
+const SYNC_BACKOFF_MAX_MS = 20000;
+const HISTORY_COUNT = 100;
+const HISTORY_TIMEOUT_MS = 5000;
 
 function emptyCloud(code) {
   return {
@@ -101,10 +108,16 @@ function emptyCloud(code) {
 
 function showScreen(id) {
   document.querySelectorAll(".screen").forEach((el) => el.classList.toggle("active", el.id === id));
-  document.body.classList.remove("mode-play", "mode-broadcast", "mode-inspect", "drawing-lock");
+  document.body.classList.remove("mode-play", "mode-broadcast", "mode-inspect", "mode-demo", "drawing-lock");
+  document.documentElement.classList.remove("drawing-lock");
+  if (id !== "screen-demo") app.demoMode = false;
   if (id === "screen-play") document.body.classList.add("mode-play");
   if (id === "screen-broadcast") document.body.classList.add("mode-broadcast");
   if (id === "screen-inspect") document.body.classList.add("mode-inspect");
+  if (id === "screen-demo") {
+    app.demoMode = true;
+    document.body.classList.add("mode-demo");
+  }
 }
 
 function currentQ() { return QUESTIONS[app.qIndex]; }
@@ -162,12 +175,17 @@ async function publishCloud(msg) {
 
 async function fetchHistory(code) {
   const ch = encodeURIComponent(channelName(code));
-  const url = `https://ps.pndsn.com/v2/history/sub-key/${SUB_KEY}/channel/${ch}?count=20`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("history");
-  const data = await res.json();
-  const list = (data && data[0]) || [];
-  return list;
+  const url = `https://ps.pndsn.com/v2/history/sub-key/${SUB_KEY}/channel/${ch}?count=${HISTORY_COUNT}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), HISTORY_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) throw new Error("history");
+    const data = await res.json();
+    return (data && data[0]) || [];
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function applyMessage(msg, opts) {
@@ -211,13 +229,18 @@ function pickNewerOnline(a, b) {
   return out;
 }
 function mergeCloud(incoming) {
-  const prevRound = app.cloud && app.cloud.roundId;
-  if (app.cloud && incoming.roundId === app.cloud.roundId) {
-    incoming.studentWork = pickNewerWorks(app.cloud.studentWork, incoming.studentWork);
-    incoming.online = pickNewerOnline(app.cloud.online, incoming.online);
+  if (!incoming) return;
+  const prev = app.cloud;
+  const prevRound = prev && prev.roundId;
+  const wasProvisional = !!(prev && prev.provisional);
+  if (incoming.provisional && prev && !prev.provisional) return;
+  if (prev && (incoming.roundId === prev.roundId || wasProvisional)) {
+    incoming.studentWork = pickNewerWorks(prev.studentWork, incoming.studentWork);
+    incoming.online = pickNewerOnline(prev.online, incoming.online);
   }
   app.cloud = incoming;
-  if (prevRound && incoming.roundId !== prevRound && app.mode === "class" && app.role === "student") {
+  if (!incoming.provisional) delete app.cloud.provisional;
+  if (prevRound && incoming.roundId !== prevRound && !wasProvisional && app.mode === "class" && app.role === "student") {
     startQuestion(incoming.unlockedQuestion || 0);
   }
 }
@@ -227,6 +250,7 @@ function afterCloudChange() {
     if ($("screen-console").classList.contains("active")) renderConsole();
     if ($("screen-inspect").classList.contains("active")) renderInspect();
     if ($("screen-room").classList.contains("active")) updateRoomStatus();
+    updateTeacherSync();
   }
   if (app.role === "student" && app.mode === "class") applyTeacherDirectives();
 }
@@ -272,6 +296,7 @@ function teacherPublishState() {
 }
 
 function studentPublishWork(lastEvent) {
+  if (app.demoMode) return;
   if (app.mode !== "class" || !app.studentNo || !app.cloud) return;
   const work = buildStudentWork(lastEvent);
   app.cloud.studentWork[String(app.studentNo)] = work;
@@ -292,6 +317,12 @@ function sendPresence() {
     app.cloud.online[key] = { no: msg.no, role: app.role, at: msg.at };
     saveRoomLocal(app.cloud);
   }
+  // Teacher re-publishes the full classroom state every presence tick
+  // so the official state is not evicted from PubNub demo history.
+  if (app.role === "teacher" && app.cloud && !app.cloud.provisional) {
+    teacherPublishState();
+    return;
+  }
   publishCloud(msg);
 }
 
@@ -301,17 +332,40 @@ function startSync() {
     bc.onmessage = (ev) => applyMessage(ev.data);
   }
   window.addEventListener("storage", onStorage);
-  app.pollTimer = setInterval(pollHistory, 2500);
+  window.addEventListener("online", onNetworkOnline);
+  app.syncFailCount = 0;
   app.presenceTimer = setInterval(sendPresence, 15000);
   sendPresence();
   pollHistory();
+  schedulePoll();
+}
+
+function schedulePoll() {
+  if (app.pollTimer) clearTimeout(app.pollTimer);
+  const fails = app.syncFailCount || 0;
+  const delay = !fails ? SYNC_POLL_MS : Math.min(SYNC_BACKOFF_MAX_MS, SYNC_POLL_MS * Math.pow(2, fails));
+  app.pollTimer = setTimeout(async () => {
+    await pollHistory();
+    if (app.roomCode) schedulePoll();
+  }, delay);
 }
 
 function stopSync() {
-  if (app.pollTimer) clearInterval(app.pollTimer);
+  if (app.pollTimer) clearTimeout(app.pollTimer);
   if (app.presenceTimer) clearInterval(app.presenceTimer);
   app.pollTimer = app.presenceTimer = null;
   window.removeEventListener("storage", onStorage);
+  window.removeEventListener("online", onNetworkOnline);
+}
+
+function onNetworkOnline() {
+  if (!app.roomCode) return;
+  app.syncFailCount = 0;
+  if (app.syncLabel !== "雲端已同步") app.syncLabel = "正在連接課堂…";
+  pollHistory();
+  schedulePoll();
+  if (app.role === "student" && app.mode === "class") updateStudentSyncBar();
+  if (app.role === "teacher") updateTeacherSync();
 }
 
 function onStorage(ev) {
@@ -328,37 +382,60 @@ async function pollHistory() {
   try {
     const list = await fetchHistory(app.roomCode);
     list.forEach((msg) => applyMessage(msg, { silent: true }));
+    app.syncFailCount = 0;
     app.syncLabel = "雲端已同步";
     afterCloudChange();
   } catch (e) {
+    app.syncFailCount = (app.syncFailCount || 0) + 1;
     const map = loadStore();
-    if (map[app.roomCode]) {
+    if (map[app.roomCode] && !(app.cloud && app.cloud.provisional)) {
       mergeCloud(map[app.roomCode]);
-      app.syncLabel = "本機同步（雲端暫時未能連接）";
-      afterCloudChange();
-    } else {
-      app.syncLabel = "尚未連上雲端";
     }
+    if (app.syncLabel !== "雲端已同步") app.syncLabel = "正在連接課堂…";
+    afterCloudChange();
   }
 }
 
-async function joinExistingRoom(code, asTeacher) {
+function normalizeClassCode(code) {
   const raw = String(code || "").replace(/\D/g, "");
   if (!/^\d{4}$/.test(raw)) return { ok: false, error: "請輸入四位課堂編號。" };
-  let found = (loadStore()[raw]) || null;
-  try {
-    const list = await fetchHistory(raw);
-    list.forEach((msg) => {
-      if (msg && msg.type === "state" && msg.state) found = msg.state;
-      else if (msg && found) applyInto(found, msg);
-    });
-  } catch (e) {}
-  if (!found) return { ok: false, error: "搵唔到呢個課堂編號。請確認老師已建立課堂。" };
-  app.roomCode = raw;
-  app.cloud = found;
-  app.lastMsgAt = found.updatedAt || 0;
-  if (asTeacher) teacherPublishState();
+  return { ok: true, code: raw };
+}
+
+function localRoomState(code) {
+  try { return loadStore()[code] || null; } catch (e) { return null; }
+}
+
+function stateFromHistory(list) {
+  let found = null;
+  (list || []).forEach((msg) => {
+    if (msg && msg.type === "state" && msg.state) found = msg.state;
+    else if (msg && found) applyInto(found, msg);
+  });
+  return found;
+}
+
+function adoptRoom(code, state, asTeacher) {
+  const use = state || Object.assign(emptyCloud(code), { provisional: true, updatedAt: 0 });
+  app.roomCode = code;
+  app.cloud = use;
+  app.lastMsgAt = (use && !use.provisional && use.updatedAt) || 0;
   startSync();
+  if (asTeacher && app.cloud && !app.cloud.provisional) teacherPublishState();
+}
+
+// Teacher rejoin still tries history (to recover student work), but never
+// refuses a valid 4-digit code if history is empty or the fetch fails.
+async function joinExistingRoom(code, asTeacher) {
+  const parsed = normalizeClassCode(code);
+  if (!parsed.ok) return parsed;
+  const raw = parsed.code;
+  let found = localRoomState(raw);
+  try {
+    const fromCloud = stateFromHistory(await fetchHistory(raw));
+    if (fromCloud) found = fromCloud;
+  } catch (e) {}
+  adoptRoom(raw, found, asTeacher);
   return { ok: true };
 }
 
@@ -380,6 +457,8 @@ function goHome() {
   app.cloud = null;
   app.pin = "";
   app.joinCode = "";
+  app.demoMode = false;
+  app.syncFailCount = 0;
   showScreen("screen-landing");
 }
 
@@ -435,11 +514,16 @@ function setPin(v) {
   $("pin-error").textContent = "";
 }
 
-async function studentJoinClass() {
+function studentJoinClass() {
   $("join-error").textContent = "";
-  const res = await joinExistingRoom(app.joinCode, false);
-  if (!res.ok) { $("join-error").textContent = res.error; return; }
+  const parsed = normalizeClassCode(app.joinCode);
+  if (!parsed.ok) { $("join-error").textContent = parsed.error; return; }
+  // Never block entry on cloud history. Start with local or empty state and
+  // sync in the background (any Wi-Fi / any iPad).
+  const found = localRoomState(parsed.code);
   app.mode = "class";
+  app.syncLabel = "正在連接課堂…";
+  adoptRoom(parsed.code, found, false);
   enterPlay(app.cloud.unlockedQuestion || 0);
 }
 
@@ -586,9 +670,9 @@ function renderEquations(root, equations, active, interactive) {
   });
 }
 
-function renderKeys() {
-  const root = $("numkeys");
-  if (root.dataset.ready) return;
+function renderKeys(rootId) {
+  const root = $(rootId || boardIds().keys);
+  if (!root || root.dataset.ready) return;
   ["1","2","3","4","5","6","7","8","9","0","刪除","清空此格"].forEach((k) => {
     const b = document.createElement("button");
     b.type = "button";
@@ -596,7 +680,7 @@ function renderKeys() {
     if (k === "刪除") b.addEventListener("click", backspace);
     else if (k === "清空此格") b.addEventListener("click", () => {
       app.equations[app.active.row][app.active.col] = "";
-      renderEquations($("equations"), app.equations, app.active, true);
+      renderEquations($(boardIds().equations), app.equations, app.active, true);
       report("typing");
     });
     else b.addEventListener("click", () => typeInto(k));
@@ -606,19 +690,19 @@ function renderKeys() {
 }
 
 function typeInto(ch) {
-  if (!$("screen-play").classList.contains("active")) return;
+  if (!isBoardScreenActive()) return;
   const { row, col } = app.active;
   const cur = app.equations[row][col];
   if (cur.length >= 3 || !/^[0-9]$/.test(ch)) return;
   app.equations[row][col] = cur === "0" ? ch : cur + ch;
-  renderEquations($("equations"), app.equations, app.active, true);
+  renderEquations($(boardIds().equations), app.equations, app.active, true);
   report("typing");
 }
 function backspace() {
-  if (!$("screen-play").classList.contains("active")) return;
+  if (!isBoardScreenActive()) return;
   const { row, col } = app.active;
   app.equations[row][col] = app.equations[row][col].slice(0, -1);
-  renderEquations($("equations"), app.equations, app.active, true);
+  renderEquations($(boardIds().equations), app.equations, app.active, true);
   report("typing");
 }
 
@@ -662,19 +746,51 @@ function paintLoops(overlay, loops, drawing) {
   ).join("");
 }
 
+function boardIds() {
+  if (app.demoMode) {
+    return {
+      board: "demo-board",
+      items: "demo-items",
+      overlay: "demo-overlay",
+      tools: "demo-loop-tools",
+      group: "demo-group-live",
+      equations: "demo-equations",
+      keys: "demo-numkeys"
+    };
+  }
+  return {
+    board: "board",
+    items: "items",
+    overlay: "overlay",
+    tools: "loop-tools",
+    group: "group-live",
+    equations: "equations",
+    keys: "numkeys"
+  };
+}
+
+function isBoardScreenActive() {
+  return $("screen-play").classList.contains("active") ||
+    ($("screen-demo") && $("screen-demo").classList.contains("active"));
+}
+
 function renderLoops() {
-  const overlay = $("overlay");
+  const ids = boardIds();
+  const overlay = $(ids.overlay);
+  if (!overlay) return;
   syncOverlayBox(overlay);
   paintLoops(overlay, app.loops, app.drawing);
   renderLoopTools();
-  colorItems("items", "overlay", app.loops);
+  colorItems(ids.items, ids.overlay, app.loops);
   updateGroupLive();
 }
 
 function renderLoopTools() {
-  const overlay = $("overlay");
-  const board = $("board");
-  const toolsRoot = $("loop-tools");
+  const ids = boardIds();
+  const overlay = $(ids.overlay);
+  const board = $(ids.board);
+  const toolsRoot = $(ids.tools);
+  if (!overlay || !board || !toolsRoot) return;
   toolsRoot.innerHTML = "";
   const rect = overlay.getBoundingClientRect();
   const boardRect = board.getBoundingClientRect();
@@ -750,8 +866,10 @@ function groupSummary(itemsId, overlayId, loops, qIndex) {
 }
 
 function updateGroupLive() {
-  const g = groupSummary();
-  const el = $("group-live");
+  const ids = boardIds();
+  const g = groupSummary(ids.items, ids.overlay);
+  const el = $(ids.group);
+  if (!el) return;
   if (!g.groups) el.textContent = "尚未圈組。請拖曳畫出環線，把物件圈成數量相同的組。";
   else if (!g.even) el.textContent = `而家圈咗 ${g.groups} 組，但每組數量唔相同。請調成每組一樣多。`;
   else if (g.grouped !== g.total) el.textContent = `而家圈咗 ${g.groups} 組，每組 ${g.perGroup} 個，已圈 ${g.grouped}／${g.total} 個。請把全部物件都圈入組。`;
@@ -778,12 +896,12 @@ function hitLoop(p) {
 }
 
 function onDown(evt) {
-  if (!$("screen-play").classList.contains("active")) return;
-  if (evt.target.closest(".loop-tools") || evt.target.closest("#loop-tools")) return;
+  if (!isBoardScreenActive()) return;
+  if (evt.target.closest(".loop-tools") || evt.target.closest("#loop-tools") || evt.target.closest("#demo-loop-tools")) return;
   evt.preventDefault();
   document.documentElement.classList.add("drawing-lock");
   document.body.classList.add("drawing-lock");
-  const overlay = $("overlay");
+  const overlay = $(boardIds().overlay);
   const p = svgPoint(evt, overlay);
   const loop = hitLoop(p);
   if (loop) app.drag = { id: loop.id, start: p, ox: loop.cx, oy: loop.cy };
@@ -796,7 +914,7 @@ function onDown(evt) {
 function onMove(evt) {
   if (!app.drawing && !app.drag) return;
   evt.preventDefault();
-  const p = svgPoint(evt, $("overlay"));
+  const p = svgPoint(evt, $(boardIds().overlay));
   if (app.drawing) {
     const s = app.drawing.start;
     app.drawing.cx = (s.x + p.x) / 2;
@@ -981,6 +1099,7 @@ function buildStudentWork(lastEvent) {
 
 let reportTimer = null;
 function report(lastEvent) {
+  if (app.demoMode) return;
   if (!app.studentNo) return;
   if (app.mode === "class" && app.submitted && (lastEvent === "typing" || lastEvent === "grouping")) {
     app.submitted = false;
@@ -1299,6 +1418,61 @@ function teacherNewRound() {
   renderConsole();
 }
 
+function enterTeacherDemo() {
+  if (!app.cloud) return;
+  app.qIndex = app.cloud.unlockedQuestion || 0;
+  app.loops = [];
+  app.drawing = null;
+  app.drag = null;
+  app.equations = ROWS.map(() => ["", "", ""]);
+  app.active = { row: 0, col: 0 };
+  app.checkResult = null;
+  app.submitted = false;
+  showScreen("screen-demo");
+  renderTeacherDemo();
+}
+
+function renderTeacherDemo() {
+  const q = currentQ();
+  $("demo-q-badge").textContent = "第 " + (app.qIndex + 1) + " 題";
+  $("demo-title").textContent = q.kindName + "：共 " + q.total + " 個";
+  $("demo-hint").textContent = q.hint;
+  $("demo-feedback").className = "feedback";
+  $("demo-feedback").textContent = "可畫環線及寫算式。此示範不會傳送到學生畫面。";
+  const items = $("demo-items");
+  items.style.gridTemplateColumns = `repeat(${q.cols}, 1fr)`;
+  items.style.gridTemplateRows = `repeat(${q.rows}, 1fr)`;
+  items.innerHTML = "";
+  for (let i = 0; i < q.total; i++) {
+    const el = document.createElement("div");
+    el.className = "item";
+    el.dataset.index = i;
+    el.innerHTML = svgFor(q.kind);
+    items.append(el);
+  }
+  renderEquations($("demo-equations"), app.equations, app.active, true);
+  renderKeys("demo-numkeys");
+  requestAnimationFrame(() => renderLoops());
+}
+
+function clearTeacherDemo() {
+  app.loops = [];
+  app.drawing = null;
+  app.drag = null;
+  app.equations = ROWS.map(() => ["", "", ""]);
+  app.active = { row: 0, col: 0 };
+  renderTeacherDemo();
+}
+
+function leaveTeacherDemo() {
+  app.loops = [];
+  app.drawing = null;
+  app.drag = null;
+  app.equations = ROWS.map(() => ["", "", ""]);
+  app.demoMode = false;
+  enterConsole();
+}
+
 function exportData() {
   if (!app.cloud) return;
   const rows = [["學號","題號","物件","總數","組數","每組","分組是否完成","算式1","算式2","算式3","算式4","結果","更新時間"]];
@@ -1370,6 +1544,9 @@ function bind() {
   $("btn-prev-q").addEventListener("click", () => teacherSetQuestion(-1));
   $("btn-reveal").addEventListener("click", toggleReveal);
   $("btn-new-round").addEventListener("click", teacherNewRound);
+  $("btn-demo").addEventListener("click", enterTeacherDemo);
+  $("btn-demo-clear").addEventListener("click", clearTeacherDemo);
+  $("btn-demo-back").addEventListener("click", leaveTeacherDemo);
   $("btn-broadcast").addEventListener("click", teacherBroadcast);
   $("btn-cancel-broadcast").addEventListener("click", teacherCancelBroadcast);
   $("btn-inspect-reveal").addEventListener("click", toggleReveal);
@@ -1380,12 +1557,13 @@ function bind() {
 
   const board = $("board");
   board.addEventListener("pointerdown", onDown);
+  $("demo-board").addEventListener("pointerdown", onDown);
   window.addEventListener("pointermove", onMove);
   window.addEventListener("pointerup", onUp);
   window.addEventListener("pointercancel", onUp);
   window.addEventListener("touchmove", onTouchMove, { passive: false });
   window.addEventListener("resize", () => {
-    if ($("screen-play").classList.contains("active")) renderLoops();
+    if (isBoardScreenActive()) renderLoops();
   });
 
   window.addEventListener("keydown", (e) => {
@@ -1401,13 +1579,13 @@ function bind() {
       else if (e.key === "Enter") submitPin();
       return;
     }
-    if (!$("screen-play").classList.contains("active")) return;
+    if (!isBoardScreenActive()) return;
     if (e.key >= "0" && e.key <= "9") { typeInto(e.key); e.preventDefault(); }
     else if (e.key === "Backspace") { backspace(); e.preventDefault(); }
     else if (e.key === "Enter" || e.key === "Tab" || e.key === "ArrowRight") {
       const i = app.active.row * 3 + app.active.col + 1;
       app.active = { row: Math.floor((i % 12) / 3), col: i % 3 };
-      renderEquations($("equations"), app.equations, app.active, true);
+      renderEquations($(boardIds().equations), app.equations, app.active, true);
       e.preventDefault();
     }
   });

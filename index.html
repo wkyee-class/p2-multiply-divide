@@ -192,11 +192,43 @@
       <button class="btn btn-primary" id="btn-next-q" type="button">進入下一題</button>
       <button class="btn btn-ghost" id="btn-prev-q" type="button">返回上一題</button>
       <button class="btn btn-soft" id="btn-reveal" type="button">顯示答案</button>
+      <button class="btn btn-accent" id="btn-demo" type="button">講解示範</button>
       <button class="btn btn-danger" id="btn-new-round" type="button">開新一輪</button>
     </div>
     <div class="section-title">全班進度（點選學生可查看作品）</div>
     <div class="progress-summary" id="teacher-summary"></div>
     <div class="progress-list" id="teacher-list"></div>
+  </div>
+
+  <div id="screen-demo" class="screen play-screen">
+    <div class="play-bar">
+      <div>
+        <h1>講解示範</h1>
+        <div class="sync-bar">
+          <div class="sync-pill">此畫面只供老師講解，不會傳送到學生 iPad</div>
+        </div>
+      </div>
+      <div class="meta demo-toolbar">
+        <div class="badge" id="demo-q-badge">第 1 題</div>
+        <button class="btn btn-soft" type="button" id="btn-demo-clear">清除重畫</button>
+        <button class="btn btn-ghost" type="button" id="btn-demo-back">返回控制台</button>
+      </div>
+    </div>
+    <main class="play" id="demo-main">
+      <section class="board" id="demo-board" aria-label="講解分組區">
+        <div class="items" id="demo-items"></div>
+        <svg class="overlay" id="demo-overlay"></svg>
+        <div id="demo-loop-tools"></div>
+      </section>
+      <aside class="panel">
+        <h2 id="demo-title">算式家庭</h2>
+        <p class="hint" id="demo-hint"></p>
+        <p class="group-live" id="demo-group-live"></p>
+        <div class="equations" id="demo-equations"></div>
+        <div class="feedback" id="demo-feedback"></div>
+        <div class="numkeys" id="demo-numkeys"></div>
+      </aside>
+    </main>
   </div>
 
   <div id="screen-inspect" class="screen">

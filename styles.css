@@ -45,9 +45,9 @@ button {
 }
 .btn { width: 100%; }
 .btn-primary { background: var(--primary); color: #fff; }
-.btn-primary:hover:not(:disabled) { background: var(--primary-dark); }
+.btn-primary:hover:not(:disabled), .btn-primary:focus-visible:not(:disabled), .btn-primary:active:not(:disabled) { background: var(--primary-dark); }
 .btn-accent { background: var(--accent); color: #fff; }
-.btn-accent:hover:not(:disabled) { background: var(--accent-dark); }
+.btn-accent:hover:not(:disabled), .btn-accent:focus-visible:not(:disabled), .btn-accent:active:not(:disabled) { background: var(--accent-dark); }
 .btn-ghost { background: #fff; color: var(--ink); border: 3px solid var(--line); }
 .btn-good { background: var(--good); color: #fff; }
 .btn-soft { background: #f3e0c8; color: var(--ink); }
@@ -84,10 +84,8 @@ button:disabled { opacity: 0.45; cursor: default; }
 
 .num-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-  max-height: 62vh;
-  overflow-y: auto;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 6px;
   padding: 4px;
   touch-action: pan-y;
 }
@@ -95,14 +93,14 @@ button:disabled { opacity: 0.45; cursor: default; }
   background: #fff5eb;
   border: 3px solid var(--line);
   border-radius: 14px;
-  min-height: 64px;
-  font-size: 1.4rem;
+  min-height: 52px;
+  font-size: 1.25rem;
   font-weight: 800;
   color: var(--ink);
   cursor: pointer;
   font-family: inherit;
 }
-.num-btn:hover, .num-btn:focus { border-color: var(--primary); background: #ffe8d1; }
+.num-btn:hover, .num-btn:focus, .num-btn:active { border-color: var(--primary); background: #ffe8d1; }
 
 .student-display, .room-code-big, .code-input {
   min-height: 88px;
@@ -222,13 +220,13 @@ main.play, .broadcast-play {
 .item .halo { position: absolute; inset: 4%; border-radius: 50%; opacity: 0; }
 .item.in-loop .halo { opacity: 0.38; }
 svg.overlay { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; touch-action: none; }
-.loop-tools, #loop-tools {
+.loop-tools, #loop-tools, #demo-loop-tools {
   position: absolute;
   z-index: 3;
   display: flex;
   transform: translate(-50%, -120%);
 }
-.loop-tools button, #loop-tools button {
+.loop-tools button, #loop-tools button, #demo-loop-tools button {
   min-height: 40px;
   padding: 0 12px;
   font-size: 16px;
@@ -308,7 +306,7 @@ svg.overlay { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 
   margin: 8px 0 12px;
   width: 100%;
 }
-.console-controls .btn { width: auto; min-width: 140px; }
+.console-controls .btn { width: auto; min-width: 120px; min-height: 48px; font-size: 18px; }
 .section-title {
   width: 100%;
   font-size: 1.15rem;
@@ -324,28 +322,28 @@ svg.overlay { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 
 .progress-list {
   width: 100%;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 4px;
   touch-action: pan-y;
 }
 .student-card {
   background: var(--paper);
   border: 3px solid var(--line);
-  border-radius: 16px;
-  padding: 10px 12px;
+  border-radius: 12px;
+  padding: 6px 7px;
   text-align: left;
   cursor: pointer;
-  min-height: 92px;
+  min-height: 0;
   color: var(--ink);
   font-family: inherit;
 }
-.student-card:hover { border-color: var(--primary); }
+.student-card:hover, .student-card:focus, .student-card:active { border-color: var(--primary); }
 .student-card.online { border-color: #86c7a3; }
 .student-card.ok { background: var(--good-bg); }
 .student-card.bad { background: var(--bad-bg); }
 .student-card.empty { opacity: 0.7; cursor: default; }
-.student-card h3 { margin: 0 0 4px; font-size: 22px; }
-.student-card p { margin: 0; font-size: 14px; font-weight: 700; color: var(--muted); }
+.student-card h3 { margin: 0 0 2px; font-size: 15px; }
+.student-card p { margin: 0; font-size: 11px; font-weight: 700; color: var(--muted); line-height: 1.3; }
 .online-names {
   width: 100%;
   background: #fff;
@@ -357,19 +355,23 @@ svg.overlay { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 
 }
 .eq-readonly { pointer-events: none; }
 
+@media (max-width: 1199px) {
+  .progress-list { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+}
 @media (max-width: 900px) {
   main.play, .broadcast-play { grid-template-columns: 1fr; grid-template-rows: minmax(34vh, 1fr) auto; }
   .panel { max-height: 52dvh; }
   .blank { min-height: 48px; font-size: 24px; }
   button, .keys button { min-height: 52px; }
   .num-grid { grid-template-columns: repeat(5, 1fr); }
-  .num-btn { min-height: 56px; font-size: 1.2rem; }
+  .num-btn { min-height: 48px; font-size: 1.15rem; }
+  .progress-list { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 }
 @media (max-width: 520px) {
   .num-grid { grid-template-columns: repeat(4, 1fr); }
 }
 
-#screen-play.active, #screen-broadcast.active, #screen-inspect.active {
+#screen-play.active, #screen-broadcast.active, #screen-inspect.active, #screen-demo.active {
   height: 100dvh;
   overflow: hidden;
   align-items: stretch;
@@ -380,7 +382,7 @@ svg.overlay { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 
   align-items: stretch;
   touch-action: pan-y;
 }
-body.mode-play, body.mode-broadcast, body.mode-inspect {
+body.mode-play, body.mode-broadcast, body.mode-inspect, body.mode-demo {
   height: 100dvh;
   overflow: hidden;
 }
@@ -393,4 +395,11 @@ body.mode-play, body.mode-broadcast, body.mode-inspect {
   font-weight: 800;
   color: var(--good);
   margin-top: 8px;
+}
+
+.demo-toolbar { gap: 8px; }
+.demo-toolbar .btn { width: auto; min-width: 120px; min-height: 48px; font-size: 18px; }
+@media (max-width: 900px) {
+  .demo-toolbar { width: 100%; justify-content: flex-end; }
+  .demo-toolbar .btn { flex: 1 1 auto; }
 }
