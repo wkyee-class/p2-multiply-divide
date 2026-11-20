@@ -1,28 +1,26 @@
 /* 乘和除的關係 — classroom game (static, GitHub Pages ready) */
 const QUESTIONS = [
   { total: 8, cols: 4, rows: 2, kind: "apple", kindName: "蘋果",
+    ops: ["×", "÷", "×", "÷"],
     hint: "共有 8 個蘋果。請用環線圈成數量相同的組，再寫出四條乘除算式家庭。" },
-  { total: 12, cols: 4, rows: 3, kind: "cake", kindName: "蛋糕",
-    hint: "共有 12 個蛋糕。試吓自己分組，再寫出呢組乘除算式家庭。" },
+  { total: 10, cols: 5, rows: 2, kind: "cake", kindName: "蛋糕",
+    ops: ["÷", "×", "÷", "×"],
+    hint: "共有 10 個蛋糕。試吓自己分組，再寫出呢組乘除算式家庭。" },
   { total: 20, cols: 5, rows: 4, kind: "pencil", kindName: "鉛筆",
+    ops: ["×", "÷", "×", "÷"],
     hint: "共有 20 支鉛筆。用環線圈成數量相同的組，再寫出四條算式。" },
   { total: 24, cols: 6, rows: 4, kind: "ball", kindName: "皮球",
+    ops: ["÷", "×", "÷", "×"],
     hint: "共有 24 個皮球。試吓另一種分組，寫出乘除算式家庭。" }
 ];
 
 const LOOP_COLORS = ["#e11d48", "#2563eb", "#059669", "#a855f7", "#d97706", "#0f766e"];
-const ROWS = [
-  { type: "mul", op: "×" },
-  { type: "mul", op: "×" },
-  { type: "div", op: "÷" },
-  { type: "div", op: "÷" }
-];
 const CLASS_SIZE = 40;
 const TEACHER_PIN = "2468";
-const CHANNEL_PREFIX = "kayee-p2md-v1-";
+const CHANNEL_PREFIX = "kayee-p2md-v2-";
 const PUB_KEY = "demo";
 const SUB_KEY = "demo";
-const STORE_KEY = "p2-multiply-divide-v1";
+const STORE_KEY = "p2-multiply-divide-v2";
 const ONLINE_STALE_MS = 90000;
 const PUBLIC_SITE_URL = "https://wkyee-class.github.io/p2-multiply-divide/";
 const CLASS_CODE_PARAM = "c";
@@ -75,7 +73,7 @@ const app = {
   loops: [],
   drawing: null,
   drag: null,
-  equations: ROWS.map(() => ["", "", ""]),
+  equations: emptyEquations(),
   active: { row: 0, col: 0 },
   checkResult: null,
   submitted: false,
@@ -131,6 +129,16 @@ function showScreen(id) {
 }
 
 function currentQ() { return QUESTIONS[app.qIndex]; }
+
+function rowsFor(qIndex) {
+  const q = QUESTIONS[qIndex == null ? app.qIndex : qIndex];
+  return (q.ops || []).map((op) => ({ type: op === "×" ? "mul" : "div", op }));
+}
+
+function emptyEquations() {
+  return [0, 1, 2, 3].map(() => ["", "", ""]);
+}
+
 
 function svgFor(kind) {
   return (SVGS[kind] || SVGS.apple) + `<div class="halo"></div>`;
@@ -640,7 +648,7 @@ function startQuestion(index, skipReport) {
     app.loops = [];
     app.drawing = null;
     app.drag = null;
-    app.equations = ROWS.map(() => ["", "", ""]);
+    app.equations = emptyEquations();
     app.active = { row: 0, col: 0 };
     app.checkResult = null;
     app.submitted = false;
@@ -661,7 +669,7 @@ function restoreWork(qIndex) {
   if (!rec) return false;
   app.loops = [];
   app.pendingLoops = rec.loops || [];
-  app.equations = (rec.equations || ROWS.map(() => ["", "", ""])).map((r) => r.slice());
+  app.equations = (rec.equations || emptyEquations()).map((r) => r.slice());
   app.checkResult = rec.checkResult || null;
   app.submitted = !!rec.submitted;
   app.active = { row: 0, col: 0 };
@@ -723,16 +731,18 @@ function updateNextButton() {
   }
 }
 
-function renderEquations(root, equations, active, interactive) {
+function renderEquations(root, equations, active, interactive, qIndex) {
+  if (!root) return;
+  if (qIndex == null) qIndex = app.qIndex;
   root.innerHTML = "";
-  ROWS.forEach((row, r) => {
+  rowsFor(qIndex).forEach((row, r) => {
     const wrap = document.createElement("div");
     wrap.className = "eq" + (interactive ? "" : " readonly");
     const blank = (c) => {
       const b = document.createElement("div");
       b.className = "blank" + (interactive && active && active.row === r && active.col === c ? " active" : "");
       b.textContent = (equations[r] && equations[r][c]) || "";
-      if (interactive) b.addEventListener("click", () => { app.active = { row: r, col: c }; renderEquations(root, equations, app.active, true); });
+      if (interactive) b.addEventListener("click", () => { app.active = { row: r, col: c }; renderEquations(root, equations, app.active, true, qIndex); });
       return b;
     };
     const op = document.createElement("div"); op.className = "op"; op.textContent = row.op;
@@ -1025,10 +1035,10 @@ function onTouchMove(e) {
   if (app.drawing || app.drag) e.preventDefault();
 }
 
-function parseRowFrom(equations, i) {
+function parseRowFrom(equations, i, qIndex) {
   const [a, b, c] = equations[i].map((v) => Number(v));
   if (!a || !b || !c) return null;
-  return { type: ROWS[i].type, a, b, c };
+  return { type: rowsFor(qIndex)[i].type, a, b, c };
 }
 function expectedFacts(groups, perGroup, total) {
   return [
@@ -1038,6 +1048,15 @@ function expectedFacts(groups, perGroup, total) {
     { type: "div", a: total, b: groups, c: perGroup }
   ];
 }
+function expectedFactsInSlotOrder(qIndex, groups, perGroup, total) {
+  const expected = expectedFacts(groups, perGroup, total);
+  const used = new Set();
+  return rowsFor(qIndex).map((row) => {
+    const idx = expected.findIndex((ans, j) => !used.has(j) && ans.type === row.type);
+    if (idx >= 0) { used.add(idx); return expected[idx]; }
+    return null;
+  }).filter(Boolean);
+}
 function sameFact(x, y) {
   return x && y && x.type === y.type && x.a === y.a && x.b === y.b && x.c === y.c;
 }
@@ -1046,10 +1065,11 @@ function formatFact(f) {
   return `${f.a} ${op} ${f.b} = ${f.c}`;
 }
 
-function evaluateWork(equations, g) {
+function evaluateWork(equations, g, qIndex) {
   if (!g || !g.allGrouped) return "incomplete";
+  if (qIndex == null) qIndex = app.qIndex;
   const expected = expectedFacts(g.groups, g.perGroup, g.total);
-  const got = [0, 1, 2, 3].map((i) => parseRowFrom(equations, i));
+  const got = [0, 1, 2, 3].map((i) => parseRowFrom(equations, i, qIndex));
   const used = new Set();
   let allFilled = true;
   let allMatch = true;
@@ -1064,17 +1084,18 @@ function evaluateWork(equations, g) {
   return "incorrect";
 }
 
-function paintEquationGrades(root, equations, g) {
+function paintEquationGrades(root, equations, g, qIndex) {
   const eqs = [...root.children];
   eqs.forEach((el) => el.classList.remove("ok", "bad"));
   if (!g || !g.allGrouped) {
     eqs.forEach((el) => el.classList.add("bad"));
     return;
   }
+  if (qIndex == null) qIndex = app.qIndex;
   const expected = expectedFacts(g.groups, g.perGroup, g.total);
   const used = new Set();
   eqs.forEach((el, i) => {
-    const row = parseRowFrom(equations, i);
+    const row = parseRowFrom(equations, i, qIndex);
     if (!row) { el.classList.add("bad"); return; }
     const idx = expected.findIndex((ans, j) => !used.has(j) && sameFact(ans, row));
     if (idx >= 0) { used.add(idx); el.classList.add("ok"); }
@@ -1436,8 +1457,8 @@ function renderStaticScene(prefix, qIndex, rec, opts) {
     el.innerHTML = svgFor(q.kind);
     items.append(el);
   }
-  const equations = (rec && rec.equations) || ROWS.map(() => ["", "", ""]);
-  renderEquations($(prefix + "-equations"), equations, null, false);
+  const equations = (rec && rec.equations) || emptyEquations();
+  renderEquations($(prefix + "-equations"), equations, null, false, qIndex);
   requestAnimationFrame(() => {
     syncOverlayBox(overlay);
     const loops = denormalizeLoops((rec && rec.loops) || [], overlay);
@@ -1451,13 +1472,13 @@ function renderStaticScene(prefix, qIndex, rec, opts) {
     ans.innerHTML = "";
     if (showGrade && rec && rec.checkResult) {
       applyFeedback(ans, rec.checkResult, g);
-      paintEquationGrades($(prefix + "-equations"), equations, g);
+      paintEquationGrades($(prefix + "-equations"), equations, g, qIndex);
     }
     if (showGrade && reveal) {
       const box = document.createElement("div");
       box.className = "answer-box";
       if (g && g.allGrouped) {
-        box.textContent = "參考答案：" + expectedFacts(g.groups, g.perGroup, g.total).map(formatFact).join("　");
+        box.textContent = "參考答案：" + expectedFactsInSlotOrder(qIndex, g.groups, g.perGroup, g.total).map(formatFact).join("　");
       } else {
         box.textContent = "要先完成均分齊全嘅分組，先至有標準算式家庭。";
       }
@@ -1510,7 +1531,7 @@ function teacherBroadcast() {
     studentNo: app.inspectNo,
     questionIndex: app.inspectQ,
     loops: rec ? rec.loops : [],
-    equations: rec ? rec.equations : ROWS.map(() => ["", "", ""]),
+    equations: rec ? rec.equations : emptyEquations(),
     groupSummary: rec ? rec.groupSummary : null,
     checkResult: rec ? rec.checkResult : null
   };
@@ -1552,7 +1573,7 @@ function enterTeacherDemo() {
   app.loops = [];
   app.drawing = null;
   app.drag = null;
-  app.equations = ROWS.map(() => ["", "", ""]);
+  app.equations = emptyEquations();
   app.active = { row: 0, col: 0 };
   app.checkResult = null;
   app.submitted = false;
@@ -1589,7 +1610,7 @@ function clearTeacherDemo() {
   app.loops = [];
   app.drawing = null;
   app.drag = null;
-  app.equations = ROWS.map(() => ["", "", ""]);
+  app.equations = emptyEquations();
   app.active = { row: 0, col: 0 };
   renderTeacherDemo();
 }
@@ -1598,7 +1619,7 @@ function leaveTeacherDemo() {
   app.loops = [];
   app.drawing = null;
   app.drag = null;
-  app.equations = ROWS.map(() => ["", "", ""]);
+  app.equations = emptyEquations();
   app.demoMode = false;
   app.demoProject = false;
   document.body.classList.remove("demo-project");
@@ -1632,7 +1653,7 @@ function exportData() {
       const eq = (rec.equations || []).map((r, i) => {
         const a = (r && r[0]) || "", b = (r && r[1]) || "", c = (r && r[2]) || "";
         if (!a && !b && !c) return "";
-        return `${a}${ROWS[i].op}${b}=${c}`;
+        return `${a}${rowsFor(q)[i].op}${b}=${c}`;
       });
       const t = rec.updatedAt ? new Date(rec.updatedAt).toLocaleString("zh-HK", { hour12: false }) : "";
       rows.push([n, q + 1, QUESTIONS[q].kindName, QUESTIONS[q].total, g.groups || "", g.perGroup || "", g.allGrouped ? "是" : "否", eq[0] || "", eq[1] || "", eq[2] || "", eq[3] || "", resultLabel(rec.checkResult, rec.submitted), t]);
@@ -1665,7 +1686,7 @@ function bind() {
   $("btn-check").addEventListener("click", checkAnswers);
   $("btn-clear-loops").addEventListener("click", () => { app.loops = []; renderLoops(); report("grouping"); });
   $("btn-clear-eq").addEventListener("click", () => {
-    app.equations = ROWS.map(() => ["", "", ""]);
+    app.equations = emptyEquations();
     app.checkResult = null;
     $("feedback").className = "feedback";
     $("feedback").textContent = "";
