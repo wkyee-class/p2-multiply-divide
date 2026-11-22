@@ -574,3 +574,98 @@ body.demo-project .demo-toolbar .btn {
   .console-controls .btn { min-height: 52px; font-size: 19px; padding: 12px 18px; }
   .progress-list { gap: 6px; }
 }
+
+/* Compact 1–4 question tabs on teacher 學生作品 (do not use global .btn width:100%) */
+#screen-inspect .header {
+  width: 100%;
+  margin-bottom: 6px;
+  flex-shrink: 0;
+}
+#inspect-tabs,
+#inspect-tabs.inspect-tab-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: stretch;
+  gap: 8px;
+  margin: 8px 0 0;
+  width: 100%;
+}
+#inspect-tabs .btn {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  min-height: 48px;
+  padding: 8px 8px;
+  font-size: 18px;
+  white-space: nowrap;
+  border: 3px solid transparent;
+}
+#inspect-tabs .btn-primary {
+  border-color: var(--primary);
+}
+#inspect-tabs .btn-ghost {
+  border-color: var(--line);
+}
+
+/* Fit iPad / computer classroom screens without page scrolling */
+html.mode-play, html.mode-broadcast, html.mode-inspect, html.mode-demo, html.mode-console,
+body.mode-play, body.mode-broadcast, body.mode-inspect, body.mode-demo, body.mode-console {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+#screen-play.active, #screen-broadcast.active, #screen-inspect.active, #screen-demo.active {
+  max-height: 100dvh;
+  min-height: 0;
+}
+#screen-console.active {
+  overflow: hidden;
+  max-height: 100dvh;
+  min-height: 0;
+}
+#screen-console .progress-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: start;
+}
+
+@media (max-width: 900px) {
+  #screen-play.active,
+  #screen-demo.active,
+  #screen-inspect.active,
+  #screen-broadcast.active {
+    padding: calc(8px + var(--safe)) 10px calc(8px + var(--safeb));
+  }
+  .play-bar { margin-bottom: 4px; gap: 4px; }
+  .play-bar h1 { font-size: clamp(18px, 3.6vw, 26px); }
+  main.play, .broadcast-play {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(30vh, 1fr) minmax(0, 1fr);
+  }
+  .panel {
+    max-height: none;
+    min-height: 0;
+    overflow: auto;
+    padding: 8px;
+  }
+  #screen-inspect .header h1 { font-size: clamp(22px, 4.5vw, 32px); }
+  .blank { min-height: 48px; font-size: 22px; }
+  .op, .eqspan { font-size: 22px; }
+  .numkeys button { min-height: 44px; font-size: 20px; }
+  .hint { margin-bottom: 4px; font-size: 15px; }
+  .group-live { margin-bottom: 4px; font-size: 16px; }
+  .feedback { min-height: 24px; margin: 4px 0; font-size: 16px; }
+  .equations { gap: 6px; }
+  .eq { padding: 4px 6px; gap: 6px; }
+  .actions { margin-top: 6px; }
+  #screen-demo.active main.play {
+    grid-template-rows: minmax(36vh, 1fr) minmax(0, 1fr);
+  }
+  #screen-demo .panel { max-height: none; }
+  body.demo-project #screen-demo.active main.play {
+    grid-template-rows: minmax(42vh, 1fr) minmax(0, 1fr);
+  }
+  body.demo-project #screen-demo .panel { max-height: none; }
+}
+

@@ -5,13 +5,13 @@ const QUESTIONS = [
     hint: "共有 8 個蘋果。請用環線圈成數量相同的組，再寫出四條乘除算式家庭。" },
   { total: 10, cols: 5, rows: 2, kind: "cake", kindName: "蛋糕",
     ops: ["÷", "×", "÷", "×"],
-    hint: "共有 10 個蛋糕。試吓自己分組，再寫出呢組乘除算式家庭。" },
+    hint: "共有 10 個蛋糕。試自行分組，再寫出這組乘除算式家庭。" },
   { total: 20, cols: 5, rows: 4, kind: "pencil", kindName: "鉛筆",
     ops: ["×", "÷", "×", "÷"],
     hint: "共有 20 支鉛筆。用環線圈成數量相同的組，再寫出四條算式。" },
   { total: 24, cols: 6, rows: 4, kind: "ball", kindName: "皮球",
     ops: ["÷", "×", "÷", "×"],
-    hint: "共有 24 個皮球。試吓另一種分組，寫出乘除算式家庭。" }
+    hint: "共有 24 個皮球。試用另一種分組，寫出乘除算式家庭。" }
 ];
 
 const LOOP_COLORS = ["#e11d48", "#2563eb", "#059669", "#a855f7", "#d97706", "#0f766e"];
@@ -88,7 +88,11 @@ const app = {
   demoMode: false,
   demoProject: false,
   pendingClassCode: "",
-  entryJoinUrl: ""
+  entryJoinUrl: "",
+  pendingLoops: null,
+  soloWork: {},
+  demoWork: {},
+  demoQ: null
 };
 
 const SYNC_POLL_MS = 2500;
@@ -111,19 +115,28 @@ function emptyCloud(code) {
 
 function showScreen(id) {
   document.querySelectorAll(".screen").forEach((el) => el.classList.toggle("active", el.id === id));
-  document.body.classList.remove("mode-play", "mode-broadcast", "mode-inspect", "mode-demo", "drawing-lock");
-  document.documentElement.classList.remove("drawing-lock");
+  const modes = ["mode-play", "mode-broadcast", "mode-inspect", "mode-demo", "mode-console", "drawing-lock"];
+  document.body.classList.remove(...modes);
+  document.documentElement.classList.remove(...modes);
   if (id !== "screen-demo") {
     app.demoMode = false;
     app.demoProject = false;
     document.body.classList.remove("demo-project");
   }
-  if (id === "screen-play") document.body.classList.add("mode-play");
-  if (id === "screen-broadcast") document.body.classList.add("mode-broadcast");
-  if (id === "screen-inspect") document.body.classList.add("mode-inspect");
+  const modeFor = {
+    "screen-play": "mode-play",
+    "screen-broadcast": "mode-broadcast",
+    "screen-inspect": "mode-inspect",
+    "screen-demo": "mode-demo",
+    "screen-console": "mode-console"
+  };
+  const mode = modeFor[id];
+  if (mode) {
+    document.body.classList.add(mode);
+    document.documentElement.classList.add(mode);
+  }
   if (id === "screen-demo") {
     app.demoMode = true;
-    document.body.classList.add("mode-demo");
     document.body.classList.toggle("demo-project", !!app.demoProject);
   }
 }
@@ -221,9 +234,7 @@ function applyMessage(msg, opts) {
     if (!app.cloud) return;
     const no = String(msg.work.studentNo);
     const prev = app.cloud.studentWork[no];
-    if (!prev || (msg.work.updatedAt || 0) >= (prev.updatedAt || 0)) {
-      app.cloud.studentWork[no] = msg.work;
-    }
+    app.cloud.studentWork[no] = mergeWorkRecord(prev, msg.work);
   } else if (msg.type === "presence") {
     if (!app.cloud) return;
     const key = msg.role === "teacher" ? "teacher" : "s:" + msg.no;
@@ -232,11 +243,69 @@ function applyMessage(msg, opts) {
   if (!opts || !opts.silent) afterCloudChange();
 }
 
+function recIsBlank(rec) {
+  if (!rec) return true;
+  const hasLoops = !!(rec.loops && rec.loops.length);
+  const hasEq = (rec.equations || []).some((row) => (row || []).some((c) => String(c || "").trim() !== ""));
+  return !hasLoops && !hasEq && !rec.submitted && !rec.checkResult;
+}
+
+function mergeWorkRecord(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const newer = (b.updatedAt || 0) >= (a.updatedAt || 0) ? b : a;
+  const older = newer === b ? a : b;
+  const out = Object.assign({}, older, newer);
+  const qs = {};
+  const keys = new Set([
+    ...Object.keys((a && a.questions) || {}),
+    ...Object.keys((b && b.questions) || {})
+  ]);
+  keys.forEach((k) => {
+    const aq = a.questions && a.questions[k];
+    const bq = b.questions && b.questions[k];
+    if (!aq) qs[k] = bq;
+    else if (!bq) qs[k] = aq;
+    else if (recIsBlank(bq) && !recIsBlank(aq)) qs[k] = aq;
+    else if (recIsBlank(aq) && !recIsBlank(bq)) qs[k] = bq;
+    else qs[k] = (bq.updatedAt || 0) >= (aq.updatedAt || 0) ? bq : aq;
+  });
+  out.questions = qs;
+  out.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0);
+  return out;
+}
+
 function pickNewerWorks(a, b) {
   const out = Object.assign({}, a || {});
   Object.keys(b || {}).forEach((k) => {
-    if (!out[k] || ((b[k].updatedAt || 0) >= (out[k].updatedAt || 0))) out[k] = b[k];
+    out[k] = mergeWorkRecord(out[k], b[k]);
   });
+  return out;
+}
+
+function mergeRoomStates(a, b) {
+  if (!a || a.provisional) {
+    if (!b || b.provisional) return b || a || null;
+    const out = Object.assign({}, b);
+    out.studentWork = pickNewerWorks(a && a.studentWork, b.studentWork);
+    delete out.provisional;
+    return out;
+  }
+  if (!b || b.provisional) {
+    const out = Object.assign({}, a);
+    if (b) out.studentWork = pickNewerWorks(a.studentWork, b.studentWork);
+    delete out.provisional;
+    return out;
+  }
+  if (a.roundId !== b.roundId) {
+    return (b.updatedAt || 0) >= (a.updatedAt || 0) ? b : a;
+  }
+  const newer = (b.updatedAt || 0) >= (a.updatedAt || 0) ? b : a;
+  const older = newer === b ? a : b;
+  const out = Object.assign({}, older, newer);
+  out.studentWork = pickNewerWorks(a.studentWork, b.studentWork);
+  out.online = pickNewerOnline(a.online, b.online);
+  out.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0);
   return out;
 }
 function pickNewerOnline(a, b) {
@@ -271,6 +340,7 @@ function afterCloudChange() {
     updateTeacherSync();
   }
   if (app.role === "student" && app.mode === "class") applyTeacherDirectives();
+  maybeRestoreStudentWork();
 }
 
 function applyTeacherDirectives() {
@@ -390,7 +460,11 @@ function onStorage(ev) {
   if (ev.key !== STORE_KEY || !app.roomCode) return;
   const map = loadStore();
   if (map[app.roomCode]) {
-    mergeCloud(map[app.roomCode]);
+    const merged = mergeRoomStates(app.cloud, map[app.roomCode]);
+    if (merged) {
+      app.cloud = merged;
+      if (app.cloud && !app.cloud.provisional) delete app.cloud.provisional;
+    }
     afterCloudChange();
   }
 }
@@ -400,6 +474,17 @@ async function pollHistory() {
   try {
     const list = await fetchHistory(app.roomCode);
     list.forEach((msg) => applyMessage(msg, { silent: true }));
+    const local = loadStore()[app.roomCode];
+    if (local) {
+      const merged = mergeRoomStates(app.cloud, local);
+      if (merged) {
+        app.cloud = merged;
+        if (app.cloud && !app.cloud.provisional) {
+          delete app.cloud.provisional;
+          saveRoomLocal(app.cloud);
+        }
+      }
+    }
     app.syncFailCount = 0;
     app.syncLabel = "雲端已同步";
     afterCloudChange();
@@ -427,8 +512,11 @@ function localRoomState(code) {
 function stateFromHistory(list) {
   let found = null;
   (list || []).forEach((msg) => {
-    if (msg && msg.type === "state" && msg.state) found = msg.state;
-    else if (msg && found) applyInto(found, msg);
+    if (msg && msg.type === "state" && msg.state) {
+      const incoming = msg.state;
+      if (!found) found = incoming;
+      else found = mergeRoomStates(found, incoming);
+    } else if (msg && found) applyInto(found, msg);
   });
   return found;
 }
@@ -438,6 +526,7 @@ function adoptRoom(code, state, asTeacher) {
   app.roomCode = code;
   app.cloud = use;
   app.lastMsgAt = (use && !use.provisional && use.updatedAt) || 0;
+  if (use && !use.provisional) saveRoomLocal(use);
   startSync();
   if (asTeacher && app.cloud && !app.cloud.provisional) teacherPublishState();
 }
@@ -451,14 +540,18 @@ async function joinExistingRoom(code, asTeacher) {
   let found = localRoomState(raw);
   try {
     const fromCloud = stateFromHistory(await fetchHistory(raw));
-    if (fromCloud) found = fromCloud;
+    found = mergeRoomStates(found, fromCloud);
   } catch (e) {}
   adoptRoom(raw, found, asTeacher);
   return { ok: true };
 }
 
 function applyInto(state, msg) {
-  if (msg.type === "work" && msg.work) state.studentWork[String(msg.work.studentNo)] = msg.work;
+  if (msg.type === "work" && msg.work) {
+    const no = String(msg.work.studentNo);
+    state.studentWork = state.studentWork || {};
+    state.studentWork[no] = mergeWorkRecord(state.studentWork[no], msg.work);
+  }
   if (msg.type === "presence") {
     const key = msg.role === "teacher" ? "teacher" : "s:" + msg.no;
     state.online[key] = { no: msg.no, role: msg.role, at: msg.at || Date.now() };
@@ -479,6 +572,10 @@ function goHome() {
   app.demoMode = false;
   app.demoProject = false;
   app.syncFailCount = 0;
+  app.pendingLoops = null;
+  app.soloWork = {};
+  app.demoWork = {};
+  app.demoQ = null;
   try { document.documentElement.classList.remove("prejoin"); } catch (e) {}
   showScreen("screen-landing");
 }
@@ -515,7 +612,7 @@ function openNumberGrid() {
   const sub = $("numbers-sub");
   if (sub) {
     sub.textContent = app.pendingClassCode
-      ? "已備好課堂，揀學號就可以加入（不用再輸入編號）"
+      ? "已備好課堂，選擇學號就可以加入（不用再輸入編號）"
       : "請點選自己的學號（不用輸入姓名或班別）";
   }
   showScreen("screen-numbers");
@@ -611,6 +708,8 @@ function studentSolo() {
   app.mode = "solo";
   app.roomCode = "";
   app.cloud = null;
+  app.soloWork = {};
+  app.pendingLoops = null;
   stopSync();
   enterPlay(0);
 }
@@ -640,14 +739,39 @@ function updateStudentSyncBar() {
 }
 
 /* ---------- game ---------- */
+function clearTransientBoardState() {
+  app.drawing = null;
+  app.drag = null;
+  app.pendingLoops = null;
+  document.documentElement.classList.remove("drawing-lock");
+  document.body.classList.remove("drawing-lock");
+  const overlay = $("overlay");
+  if (overlay) overlay.innerHTML = "";
+  const tools = $("loop-tools");
+  if (tools) tools.innerHTML = "";
+}
+
+function saveSoloWork(qIndex) {
+  if (app.mode !== "solo") return;
+  const overlay = $("overlay");
+  app.soloWork = app.soloWork || {};
+  app.soloWork[String(qIndex)] = {
+    loops: overlay ? normalizeLoops(app.loops, overlay) : [],
+    equations: (app.equations || emptyEquations()).map((r) => r.slice()),
+    checkResult: app.checkResult,
+    submitted: !!app.submitted,
+    updatedAt: Date.now()
+  };
+}
+
 function startQuestion(index, skipReport) {
   const q = Math.max(0, Math.min(3, index));
+  if (app.mode === "solo" && app.qIndex !== q) saveSoloWork(app.qIndex);
+  clearTransientBoardState();
   const saved = restoreWork(q);
   app.qIndex = q;
   if (!saved) {
     app.loops = [];
-    app.drawing = null;
-    app.drag = null;
     app.equations = emptyEquations();
     app.active = { row: 0, col: 0 };
     app.checkResult = null;
@@ -663,9 +787,15 @@ function startQuestion(index, skipReport) {
 }
 
 function restoreWork(qIndex) {
-  if (app.mode !== "class" || !app.cloud || !app.studentNo) return false;
-  const work = app.cloud.studentWork[String(app.studentNo)];
-  const rec = work && work.questions && work.questions[String(qIndex)];
+  let rec = null;
+  if (app.mode === "solo") {
+    rec = app.soloWork && app.soloWork[String(qIndex)];
+  } else if (app.mode === "class" && app.cloud && app.studentNo) {
+    const work = app.cloud.studentWork[String(app.studentNo)];
+    rec = work && work.questions && work.questions[String(qIndex)];
+  } else {
+    return false;
+  }
   if (!rec) return false;
   app.loops = [];
   app.pendingLoops = rec.loops || [];
@@ -674,6 +804,24 @@ function restoreWork(qIndex) {
   app.submitted = !!rec.submitted;
   app.active = { row: 0, col: 0 };
   return true;
+}
+
+function boardLooksBlank() {
+  const hasLoops = (app.loops && app.loops.length) || (app.pendingLoops && app.pendingLoops.length);
+  const hasEq = (app.equations || []).some((row) => (row || []).some((c) => String(c || "").trim() !== ""));
+  return !hasLoops && !hasEq && !app.submitted && !app.checkResult;
+}
+
+function maybeRestoreStudentWork() {
+  if (app.demoMode) return;
+  if (app.role !== "student" || app.mode !== "class" || !app.cloud || !app.studentNo) return;
+  if (!$("screen-play") || !$("screen-play").classList.contains("active")) return;
+  const work = app.cloud.studentWork[String(app.studentNo)];
+  const rec = work && work.questions && work.questions[String(app.qIndex)];
+  if (!rec || recIsBlank(rec)) return;
+  if (!boardLooksBlank()) return;
+  restoreWork(app.qIndex);
+  renderQuestion();
 }
 
 function renderQuestion() {
@@ -727,7 +875,7 @@ function updateNextButton() {
     $("wait-next").classList.add("hidden");
   } else {
     btn.disabled = true;
-    btn.textContent = "請等老師進入下一題";
+    btn.textContent = "請等候老師進入下一題";
   }
 }
 
@@ -953,14 +1101,14 @@ function updateGroupLive() {
   const el = $(ids.group);
   if (!el) return;
   if (!g.groups) el.textContent = "尚未圈組。請拖曳畫出環線，把物件圈成數量相同的組。";
-  else if (!g.even) el.textContent = `而家圈咗 ${g.groups} 組，但每組數量唔相同。請調成每組一樣多。`;
-  else if (g.grouped !== g.total) el.textContent = `而家圈咗 ${g.groups} 組，每組 ${g.perGroup} 個，已圈 ${g.grouped}／${g.total} 個。請把全部物件都圈入組。`;
-  else el.textContent = `而家圈咗 ${g.groups} 組，每組 ${g.perGroup} 個。請寫出呢組算式家庭。`;
+  else if (!g.even) el.textContent = `現在已圈了 ${g.groups} 組，但每組數量不相同。請調整至每組一樣多。`;
+  else if (g.grouped !== g.total) el.textContent = `現在已圈了 ${g.groups} 組，每組 ${g.perGroup} 個，已圈 ${g.grouped}／${g.total} 個。請把全部物件都圈入組。`;
+  else el.textContent = `現在已圈了 ${g.groups} 組，每組 ${g.perGroup} 個。請寫出這組算式家庭。`;
 }
 
 function groupText(g) {
   if (!g || !g.groups) return "尚未圈組";
-  if (!g.even) return `圈咗 ${g.groups} 組，每組數量唔同`;
+  if (!g.even) return `已圈了 ${g.groups} 組，每組數量不同`;
   return `${g.groups} 組、每組 ${g.perGroup} 個（已圈 ${g.grouped}／${g.total}）`;
 }
 
@@ -1065,40 +1213,77 @@ function formatFact(f) {
   return `${f.a} ${op} ${f.b} = ${f.c}`;
 }
 
+function factorPairs(total) {
+  const pairs = [];
+  for (let a = 1; a <= total; a++) {
+    if (total % a === 0) {
+      const b = total / a;
+      if (a <= b) pairs.push([a, b]);
+    }
+  }
+  return pairs;
+}
+
+function familyKey(a, b) {
+  return a <= b ? a + "x" + b : b + "x" + a;
+}
+
+function isValidFactForTotal(row, total) {
+  if (!row || !total) return false;
+  if (row.type === "mul") {
+    return row.a >= 1 && row.b >= 1 && row.a * row.b === row.c && row.c === total;
+  }
+  if (row.type === "div") {
+    return row.a === total && row.b >= 1 && row.c >= 1 && row.b * row.c === row.a;
+  }
+  return false;
+}
+
+function familyKeyFromRow(row, total) {
+  if (!isValidFactForTotal(row, total)) return null;
+  if (row.type === "mul") return familyKey(row.a, row.b);
+  return familyKey(row.b, row.c);
+}
+
+function referenceAnswersText(qIndex) {
+  const total = QUESTIONS[qIndex].total;
+  const families = factorPairs(total).map(([a, b]) =>
+    expectedFactsInSlotOrder(qIndex, a, b, total).map(formatFact).join("　")
+  );
+  return "參考答案（以下任何一組完整算式家庭均可）：" + families.join(" ／ ");
+}
+
 function evaluateWork(equations, g, qIndex) {
-  if (!g || !g.allGrouped) return "incomplete";
   if (qIndex == null) qIndex = app.qIndex;
-  const expected = expectedFacts(g.groups, g.perGroup, g.total);
+  const total = QUESTIONS[qIndex].total;
   const got = [0, 1, 2, 3].map((i) => parseRowFrom(equations, i, qIndex));
+  if (got.some((row) => !row)) return "incomplete";
+  if (got.some((row) => !isValidFactForTotal(row, total))) return "incorrect";
+  const keys = got.map((row) => familyKeyFromRow(row, total));
+  if (new Set(keys).size !== 1) return "incorrect";
+  const parts = keys[0].split("x").map(Number);
+  const expected = expectedFacts(parts[0], parts[1], total);
   const used = new Set();
-  let allFilled = true;
   let allMatch = true;
   got.forEach((row) => {
-    if (!row) { allFilled = false; allMatch = false; return; }
     const idx = expected.findIndex((ans, j) => !used.has(j) && sameFact(ans, row));
     if (idx >= 0) used.add(idx);
     else allMatch = false;
   });
-  if (!allFilled) return "incomplete";
   if (allMatch && used.size === 4) return "correct";
   return "incorrect";
 }
 
 function paintEquationGrades(root, equations, g, qIndex) {
+  if (!root) return;
   const eqs = [...root.children];
   eqs.forEach((el) => el.classList.remove("ok", "bad"));
-  if (!g || !g.allGrouped) {
-    eqs.forEach((el) => el.classList.add("bad"));
-    return;
-  }
   if (qIndex == null) qIndex = app.qIndex;
-  const expected = expectedFacts(g.groups, g.perGroup, g.total);
-  const used = new Set();
+  const total = QUESTIONS[qIndex].total;
   eqs.forEach((el, i) => {
     const row = parseRowFrom(equations, i, qIndex);
-    if (!row) { el.classList.add("bad"); return; }
-    const idx = expected.findIndex((ans, j) => !used.has(j) && sameFact(ans, row));
-    if (idx >= 0) { used.add(idx); el.classList.add("ok"); }
+    if (!row) return;
+    if (isValidFactForTotal(row, total)) el.classList.add("ok");
     else el.classList.add("bad");
   });
 }
@@ -1147,15 +1332,13 @@ function checkAnswers() {
 function applyFeedback(el, result, g) {
   if (result === "correct") {
     el.className = "feedback ok";
-    el.textContent = `正確！${g.groups} 組、每組 ${g.perGroup} 個，呢四條就係呢組乘除算式家庭。`;
+    el.textContent = "正確！這四條就是這組乘除算式家庭。";
   } else if (result === "incorrect") {
     el.className = "feedback bad";
-    el.textContent = "仲未完全正確。請根據你圈到嘅組數同每組數量再寫算式。";
+    el.textContent = "尚未完全正確。請寫出同一組因數的兩條乘法和兩條除法。";
   } else if (result === "incomplete") {
     el.className = "feedback bad";
-    el.textContent = g && !g.allGrouped
-      ? "請先用環線把全部物件圈成數量相同、而且多於一組的分組。"
-      : "請先填齊四條算式（兩條乘法、兩條除法）。";
+    el.textContent = "請先填齊四條算式（兩條乘法、兩條除法）。";
   } else {
     el.className = "feedback";
     el.textContent = "";
@@ -1163,6 +1346,10 @@ function applyFeedback(el, result, g) {
 }
 
 function saveCurrentWork() {
+  if (app.mode === "solo") {
+    saveSoloWork(app.qIndex);
+    return;
+  }
   if (app.mode !== "class") return;
   studentPublishWork("autosave");
 }
@@ -1181,12 +1368,15 @@ function buildStudentWork(lastEvent) {
     updatedAt: Date.now()
   };
   prev.questions = prev.questions || {};
-  prev.questions[String(app.qIndex)] = rec;
+  const prevRec = prev.questions[String(app.qIndex)];
+  const keepPrev = recIsBlank(rec) && prevRec && !recIsBlank(prevRec) &&
+    (lastEvent === "question" || lastEvent === "autosave" || lastEvent === "next");
+  prev.questions[String(app.qIndex)] = keepPrev ? prevRec : rec;
   prev.studentNo = app.studentNo;
   prev.currentQuestion = app.qIndex;
   prev.phase = $("screen-done").classList.contains("active") ? "done" : "playing";
   prev.lastEvent = lastEvent;
-  prev.updatedAt = rec.updatedAt;
+  prev.updatedAt = keepPrev ? Math.max(prev.updatedAt || 0, prevRec.updatedAt || 0) : rec.updatedAt;
   return prev;
 }
 
@@ -1221,7 +1411,7 @@ function goNextOrDone() {
     }
     if (app.qIndex >= 3) {
       report("done");
-      $("done-text").textContent = "你已經完成老師安排嘅題目。請等候老師指示。";
+      $("done-text").textContent = "你已經完成老師安排的題目。請等候老師指示。";
       showScreen("screen-done");
       return;
     }
@@ -1265,7 +1455,7 @@ function regenRoom() {
   app.roomCode = genRoomCode();
   app.cloud = emptyCloud(app.roomCode);
   $("room-code-display").textContent = app.roomCode;
-  $("room-status").textContent = "已換新編號。舊編號嘅課堂資料仍然保留，可用下面重開。";
+  $("room-status").textContent = "已換新編號。舊編號的課堂資料仍然保留，可用下面重新開啟。";
   saveRoomLocal(app.cloud);
   teacherPublishState();
   if ($("screen-entry") && $("screen-entry").classList.contains("active")) showEntryScreen();
@@ -1289,7 +1479,7 @@ function updateRoomStatus() {
   if (!app.cloud) return;
   const n = onlineStudents().length;
   $("room-code-display").textContent = app.cloud.code;
-  $("room-status").textContent = "課堂已準備。而家在線學生：" + n + " 人。";
+  $("room-status").textContent = "課堂已準備。現在在線學生：" + n + " 人。";
 }
 
 function showEntryScreen() {
@@ -1386,7 +1576,7 @@ function renderConsole() {
   $("teacher-code-pill").textContent = app.cloud.code;
   const online = onlineStudents();
   $("teacher-online-pill").textContent = "在線：" + online.length;
-  $("teacher-q-badge").textContent = "而家全班：第 " + (app.cloud.unlockedQuestion + 1) + " 題";
+  $("teacher-q-badge").textContent = "現在全班：第 " + (app.cloud.unlockedQuestion + 1) + " 題";
   $("btn-next-q").disabled = app.cloud.unlockedQuestion >= 3;
   $("btn-prev-q").disabled = app.cloud.unlockedQuestion <= 0;
   $("btn-reveal").textContent = app.cloud.reveal ? "隱藏答案" : "顯示答案";
@@ -1420,7 +1610,7 @@ function renderConsole() {
     if (!work) p1.textContent = "尚未進入";
     else {
       const qq = (work.currentQuestion || 0) + 1;
-      p1.textContent = `做到第 ${qq} 題　${groupText(rec && rec.groupSummary)}　${resultLabel(rec && rec.checkResult, rec && rec.submitted)}`;
+      p1.textContent = `已做至第 ${qq} 題　${groupText(rec && rec.groupSummary)}　${resultLabel(rec && rec.checkResult, rec && rec.submitted)}`;
     }
     card.append(h, p1);
     card.addEventListener("click", () => openInspect(n));
@@ -1466,8 +1656,11 @@ function renderStaticScene(prefix, qIndex, rec, opts) {
     colorItems(prefix + "-items", prefix + "-overlay", loops);
     const g = rec && rec.groupSummary ? rec.groupSummary : groupSummary(prefix + "-items", prefix + "-overlay", loops, qIndex);
     $(prefix + "-group").textContent = groupText(g);
-    const reveal = !!(opts && opts.reveal);
-    const showGrade = !!(opts && opts.showGrade);
+    // Broadcast / student discussion must never show grades or reference answers,
+    // even if the teacher has 顯示答案 turned on for the inspect console.
+    const isBroadcast = prefix === "broadcast";
+    const reveal = !isBroadcast && !!(opts && opts.reveal);
+    const showGrade = !isBroadcast && !!(opts && opts.showGrade);
     const ans = $(prefix + "-answer");
     ans.innerHTML = "";
     if (showGrade && rec && rec.checkResult) {
@@ -1477,11 +1670,7 @@ function renderStaticScene(prefix, qIndex, rec, opts) {
     if (showGrade && reveal) {
       const box = document.createElement("div");
       box.className = "answer-box";
-      if (g && g.allGrouped) {
-        box.textContent = "參考答案：" + expectedFactsInSlotOrder(qIndex, g.groups, g.perGroup, g.total).map(formatFact).join("　");
-      } else {
-        box.textContent = "要先完成均分齊全嘅分組，先至有標準算式家庭。";
-      }
+      box.textContent = referenceAnswersText(qIndex);
       ans.append(box);
     }
   });
@@ -1495,9 +1684,9 @@ function renderInspect() {
   if (!tabs) {
     tabs = document.createElement("div");
     tabs.id = "inspect-tabs";
-    tabs.className = "btn-row";
     $("inspect-sub").after(tabs);
   }
+  tabs.className = "inspect-tab-row";
   tabs.innerHTML = "";
   for (let i = 0; i < 4; i++) {
     const b = document.createElement("button");
@@ -1567,10 +1756,32 @@ function teacherNewRound() {
   renderConsole();
 }
 
+function saveDemoBoard() {
+  const overlay = $("demo-overlay");
+  app.demoWork = app.demoWork || {};
+  const q = app.demoQ != null ? app.demoQ : app.qIndex;
+  app.demoWork[String(q)] = {
+    loops: overlay ? normalizeLoops(app.loops, overlay) : (app.pendingLoops || []),
+    equations: (app.equations || emptyEquations()).map((r) => r.slice())
+  };
+}
+
+function clearDemoTransient() {
+  app.drawing = null;
+  app.drag = null;
+  document.documentElement.classList.remove("drawing-lock");
+  document.body.classList.remove("drawing-lock");
+  const overlay = $("demo-overlay");
+  if (overlay) overlay.innerHTML = "";
+  const tools = $("demo-loop-tools");
+  if (tools) tools.innerHTML = "";
+}
+
 function enterTeacherDemo() {
   if (!app.cloud) return;
   app.qIndex = app.cloud.unlockedQuestion || 0;
   app.loops = [];
+  app.pendingLoops = null;
   app.drawing = null;
   app.drag = null;
   app.equations = emptyEquations();
@@ -1578,12 +1789,34 @@ function enterTeacherDemo() {
   app.checkResult = null;
   app.submitted = false;
   app.demoProject = false;
+  app.demoWork = {};
+  app.demoQ = null;
   showScreen("screen-demo");
   syncDemoProjectButton();
   renderTeacherDemo();
 }
 
 function renderTeacherDemo() {
+  if (app.demoQ != null && app.demoQ !== app.qIndex) {
+    saveDemoBoard();
+    clearDemoTransient();
+    app.pendingLoops = null;
+    const rec = app.demoWork && app.demoWork[String(app.qIndex)];
+    if (rec) {
+      app.loops = [];
+      app.pendingLoops = rec.loops || [];
+      app.equations = (rec.equations || emptyEquations()).map((r) => r.slice());
+      app.active = { row: 0, col: 0 };
+    } else {
+      app.loops = [];
+      app.pendingLoops = null;
+      app.equations = emptyEquations();
+      app.active = { row: 0, col: 0 };
+    }
+  } else {
+    clearDemoTransient();
+  }
+  app.demoQ = app.qIndex;
   const q = currentQ();
   $("demo-q-badge").textContent = "第 " + (app.qIndex + 1) + " 題";
   $("demo-title").textContent = q.kindName + "：共 " + q.total + " 個";
@@ -1603,25 +1836,40 @@ function renderTeacherDemo() {
   }
   renderEquations($("demo-equations"), app.equations, app.active, true);
   renderKeys("demo-numkeys");
-  requestAnimationFrame(() => renderLoops());
+  const applyDemoLoops = () => {
+    const overlay = $("demo-overlay");
+    if (overlay) syncOverlayBox(overlay);
+    if (app.pendingLoops) {
+      app.loops = denormalizeLoops(app.pendingLoops, overlay);
+      app.pendingLoops = null;
+    }
+    renderLoops();
+  };
+  applyDemoLoops();
+  requestAnimationFrame(applyDemoLoops);
 }
 
 function clearTeacherDemo() {
   app.loops = [];
+  app.pendingLoops = null;
   app.drawing = null;
   app.drag = null;
   app.equations = emptyEquations();
   app.active = { row: 0, col: 0 };
+  if (app.demoWork) delete app.demoWork[String(app.qIndex)];
   renderTeacherDemo();
 }
 
 function leaveTeacherDemo() {
   app.loops = [];
+  app.pendingLoops = null;
   app.drawing = null;
   app.drag = null;
   app.equations = emptyEquations();
   app.demoMode = false;
   app.demoProject = false;
+  app.demoWork = {};
+  app.demoQ = null;
   document.body.classList.remove("demo-project");
   enterConsole();
 }
@@ -1770,7 +2018,27 @@ function bind() {
   });
 }
 
+function onPageResume() {
+  // Resume sync after Safari sleep / tab restore. Never drop the session or go home.
+  if (!app.roomCode) return;
+  if (app.cloud && !app.cloud.provisional) saveRoomLocal(app.cloud);
+  if (app.role === "student" && app.mode === "class") saveCurrentWork();
+  app.syncFailCount = 0;
+  pollHistory();
+  schedulePoll();
+  sendPresence();
+}
+
+function bindPageResume() {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") onPageResume();
+    else if (app.roomCode && app.cloud && !app.cloud.provisional) saveRoomLocal(app.cloud);
+  });
+  window.addEventListener("pageshow", onPageResume);
+}
+
 bind();
+bindPageResume();
 const prefilledCode = readClassCodeFromUrl();
 if (prefilledCode) {
   app.pendingClassCode = prefilledCode;
