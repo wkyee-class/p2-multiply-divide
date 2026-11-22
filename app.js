@@ -1089,6 +1089,9 @@ function clientToOverlay(clientX, clientY, overlay) {
   };
 }
 
+const LOOP_HIT_INSET = 0.21;
+const LOOP_HIT_SCALE = 1.11;
+
 function artworkCorners(el, overlay) {
   const svg = el.querySelector("svg");
   if (svg) {
@@ -1118,15 +1121,37 @@ function artworkCorners(el, overlay) {
   return [];
 }
 
-function insideLoop(px, py, loop) {
-  const dx = (px - loop.cx) / Math.max(loop.rx, 1);
-  const dy = (py - loop.cy) / Math.max(loop.ry, 1);
+function insideLoop(px, py, loop, scale) {
+  const s = scale == null ? 1 : scale;
+  const dx = (px - loop.cx) / Math.max(loop.rx * s, 1e-6);
+  const dy = (py - loop.cy) / Math.max(loop.ry * s, 1e-6);
   return dx * dx + dy * dy <= 1;
 }
 
-function itemInsideLoop(el, overlay, loop) {
+function insetArtworkPoints(el, overlay) {
   const pts = artworkCorners(el, overlay);
-  return pts.length > 0 && pts.every((p) => insideLoop(p.x, p.y, loop));
+  if (pts.length < 2) return [];
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const minX = Math.min.apply(null, xs);
+  const maxX = Math.max.apply(null, xs);
+  const minY = Math.min.apply(null, ys);
+  const maxY = Math.max.apply(null, ys);
+  const w = maxX - minX;
+  const h = maxY - minY;
+  const ix = w * LOOP_HIT_INSET;
+  const iy = h * LOOP_HIT_INSET;
+  return [
+    { x: minX + ix, y: minY + iy },
+    { x: maxX - ix, y: minY + iy },
+    { x: minX + ix, y: maxY - iy },
+    { x: maxX - ix, y: maxY - iy }
+  ];
+}
+
+function itemInsideLoop(el, overlay, loop) {
+  const pts = insetArtworkPoints(el, overlay);
+  return pts.length > 0 && pts.every((p) => insideLoop(p.x, p.y, loop, LOOP_HIT_SCALE));
 }
 
 function itemCenters(itemsId, overlayId) {
@@ -1407,6 +1432,7 @@ function showStudentFeedback() {
 }
 
 function checkAnswers() {
+  if (app.demoMode) return;
   const g = groupSummary();
   app.checkResult = evaluateWork(app.equations, g);
   if (app.mode === "solo") {
@@ -1426,10 +1452,10 @@ function checkAnswers() {
 function applyFeedback(el, result, g) {
   if (result === "correct") {
     el.className = "feedback ok";
-    el.textContent = "正確！這兩條就是同一組因數的乘法和除法。";
+    el.textContent = "正確！這兩條就是同一組乘除算式家庭。";
   } else if (result === "incorrect") {
     el.className = "feedback bad";
-    el.textContent = "尚未完全正確。請寫出同一組因數的一條乘法和一條除法。";
+    el.textContent = "尚未完全正確。請寫出同一組乘除算式家庭（一條乘法、一條除法）。";
   } else if (result === "incomplete") {
     el.className = "feedback bad";
     el.textContent = "請先填齊兩條算式（一條乘法、一條除法）。";
@@ -1658,9 +1684,8 @@ function updateTeacherSync() {
 }
 
 function resultLabel(r, submitted) {
-  const grade = r === "correct" ? "答對" : r === "incorrect" ? "答錯" : r === "incomplete" ? "未完成" : "未評定";
-  if (submitted) return "已提交・" + grade;
-  if (r) return "作答中・" + grade;
+  if (submitted) return "已提交";
+  if (r) return "作答中";
   return "尚未提交";
 }
 
@@ -1698,7 +1723,7 @@ function renderConsole() {
     names.textContent = online.length ? ("在線學號：" + online.join("、")) : "暫時未有學生在線。";
   } else names.classList.add("hidden");
 
-  let joined = 0, correctNow = 0, wrongNow = 0;
+  let joined = 0;
   const q = app.cloud.unlockedQuestion;
   const list = $("teacher-list");
   list.innerHTML = "";
@@ -1710,8 +1735,6 @@ function renderConsole() {
     card.type = "button";
     card.className = "student-card";
     if (isOnline) card.classList.add("online");
-    if (rec && rec.checkResult === "correct") { card.classList.add("ok"); correctNow++; }
-    else if (rec && rec.checkResult === "incorrect") { card.classList.add("bad"); wrongNow++; }
     if (!work) card.classList.add("empty");
     else joined++;
     const h = document.createElement("h3");
@@ -1727,7 +1750,7 @@ function renderConsole() {
     list.append(card);
   }
   $("teacher-summary").textContent =
-    `已進入 ${joined} 人　在線 ${online.length} 人　目前題答對 ${correctNow}　答錯 ${wrongNow}`;
+    `已進入 ${joined} 人　在線 ${online.length} 人`;
 }
 
 function openInspect(n) {
@@ -1760,30 +1783,32 @@ function renderStaticScene(prefix, qIndex, rec, opts) {
   items.classList.toggle("grid-dense", q.total >= 20);
   const equations = normalizeEquations(rec && rec.equations, qIndex);
   renderEquations($(prefix + "-equations"), equations, null, false, qIndex);
+  const isBroadcast = prefix === "broadcast";
+  // Teacher-controlled scenes never show right/wrong or red/green marks.
+  // 顯示答案 (inspect / console only, off by default) shows reference answers only.
+  // Broadcast / student discussion must never show grades or reference answers,
+  // even if the teacher has 顯示答案 turned on for the inspect console.
+  const reveal = !isBroadcast && !!(opts && opts.reveal);
+  const ans = $(prefix + "-answer");
+  if (ans) {
+    ans.innerHTML = "";
+    if (reveal) {
+      const box = document.createElement("div");
+      box.className = "answer-box";
+      box.textContent = referenceAnswersText(qIndex);
+      ans.append(box);
+    }
+  }
+  const eqRoot = $(prefix + "-equations");
+  if (eqRoot) [...eqRoot.children].forEach((el) => el.classList.remove("ok", "bad"));
   requestAnimationFrame(() => {
     syncOverlayBox(overlay);
     const loops = denormalizeLoops((rec && rec.loops) || [], overlay);
     paintLoops(overlay, loops, null);
     colorItems(prefix + "-items", prefix + "-overlay", loops);
     const g = rec && rec.groupSummary ? rec.groupSummary : groupSummary(prefix + "-items", prefix + "-overlay", loops, qIndex);
-    $(prefix + "-group").textContent = groupText(g);
-    // Broadcast / student discussion must never show grades or reference answers,
-    // even if the teacher has 顯示答案 turned on for the inspect console.
-    const isBroadcast = prefix === "broadcast";
-    const reveal = !isBroadcast && !!(opts && opts.reveal);
-    const showGrade = !isBroadcast && !!(opts && opts.showGrade);
-    const ans = $(prefix + "-answer");
-    ans.innerHTML = "";
-    if (showGrade && rec && rec.checkResult) {
-      applyFeedback(ans, rec.checkResult, g);
-      paintEquationGrades($(prefix + "-equations"), equations, g, qIndex);
-    }
-    if (showGrade && reveal) {
-      const box = document.createElement("div");
-      box.className = "answer-box";
-      box.textContent = referenceAnswersText(qIndex);
-      ans.append(box);
-    }
+    const groupEl = $(prefix + "-group");
+    if (groupEl) groupEl.textContent = groupText(g);
   });
 }
 
@@ -1811,7 +1836,7 @@ function renderInspect() {
   $("btn-broadcast").classList.toggle("hidden", !!broadcasting);
   $("btn-cancel-broadcast").classList.toggle("hidden", !broadcasting);
   $("btn-inspect-reveal").textContent = app.cloud && app.cloud.reveal ? "隱藏答案" : "顯示答案";
-  renderStaticScene("inspect", app.inspectQ, rec, { showGrade: true, reveal: !!(app.cloud && app.cloud.reveal) });
+  renderStaticScene("inspect", app.inspectQ, rec, { showGrade: false, reveal: !!(app.cloud && app.cloud.reveal) });
 }
 
 function renderBroadcast() {
