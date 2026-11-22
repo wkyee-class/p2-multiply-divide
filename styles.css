@@ -213,13 +213,15 @@ main.play, .broadcast-play {
   position: absolute;
   inset: 0;
   display: grid;
-  padding: 14px;
-  gap: 6px;
+  padding: 18px;
+  gap: 12px;
+}
+.items.grid-dense {
+  padding: 16px;
+  gap: 10px;
 }
 .item { position: relative; display: flex; align-items: center; justify-content: center; pointer-events: none; }
-.item svg { width: min(100%, 120px); height: auto; filter: drop-shadow(0 6px 6px rgba(58,36,21,.14)); }
-.item .halo { position: absolute; inset: 4%; border-radius: 50%; opacity: 0; }
-.item.in-loop .halo { opacity: 0.38; }
+.item svg { width: 68%; height: 68%; max-width: 88px; max-height: 88px; display: block; }
 svg.overlay { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; touch-action: none; }
 .loop-tools, #loop-tools, #demo-loop-tools {
   position: absolute;
@@ -322,6 +324,20 @@ svg.overlay { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 
   width: 100%;
 }
 .console-controls .btn { width: auto; min-width: 120px; min-height: 48px; font-size: 18px; }
+.console-broadcast-status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#console-broadcast-badge {
+  font-weight: 800;
+  background: #fff8e8;
+  border: 3px solid var(--line);
+  color: var(--ink);
+  padding: 8px 14px;
+  border-radius: 16px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  font-size: 18px;
+}
+#btn-console-cancel-broadcast { min-width: 148px; }
 .section-title {
   width: 100%;
   font-size: 1.15rem;
@@ -554,7 +570,7 @@ body.demo-project #screen-demo .eqspan {
 body.demo-project #screen-demo .panel h2 { font-size: clamp(24px, 2.6vw, 36px); }
 body.demo-project #screen-demo .group-live { font-size: clamp(20px, 2.2vw, 28px); }
 body.demo-project #screen-demo .numkeys button { min-height: 46px; font-size: 20px; }
-body.demo-project #demo-items .item svg { width: min(100%, 200px); }
+body.demo-project #demo-items .item svg { width: 70%; height: 70%; max-width: 110px; max-height: 110px; display: block; }
 body.demo-project .demo-toolbar .btn {
   min-height: 56px;
   font-size: 22px;

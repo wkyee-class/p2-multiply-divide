@@ -1,16 +1,16 @@
 /* 乘和除的關係 — classroom game (static, GitHub Pages ready) */
 const QUESTIONS = [
   { total: 8, cols: 4, rows: 2, kind: "apple", kindName: "蘋果",
-    ops: ["×", "÷", "×", "÷"],
-    hint: "共有 8 個蘋果。請用環線圈成數量相同的組，再寫出四條乘除算式家庭。" },
+    ops: ["×", "÷"],
+    hint: "共有 8 個蘋果。請用環線圈成數量相同的組，再寫出兩條乘除算式家庭。" },
   { total: 10, cols: 5, rows: 2, kind: "cake", kindName: "蛋糕",
-    ops: ["÷", "×", "÷", "×"],
+    ops: ["÷", "×"],
     hint: "共有 10 個蛋糕。試自行分組，再寫出這組乘除算式家庭。" },
   { total: 20, cols: 5, rows: 4, kind: "pencil", kindName: "鉛筆",
-    ops: ["×", "÷", "×", "÷"],
-    hint: "共有 20 支鉛筆。用環線圈成數量相同的組，再寫出四條算式。" },
+    ops: ["×", "÷"],
+    hint: "共有 20 支鉛筆。用環線圈成數量相同的組，再寫出兩條算式。" },
   { total: 24, cols: 6, rows: 4, kind: "ball", kindName: "皮球",
-    ops: ["÷", "×", "÷", "×"],
+    ops: ["÷", "×"],
     hint: "共有 24 個皮球。試用另一種分組，寫出乘除算式家庭。" }
 ];
 
@@ -27,14 +27,12 @@ const CLASS_CODE_PARAM = "c";
 
 const SVGS = {
   apple: `<svg viewBox="0 0 120 130" aria-hidden="true">
-    <ellipse cx="60" cy="118" rx="28" ry="6" fill="rgba(58,36,21,0.16)"/>
     <path d="M60 28c8 10 8 18 0 22-8-4-8-12 0-22z" fill="#2f9e44"/>
     <path d="M62 24c16-8 26-6 28 0-12 6-20 14-26 24-8-10-10-16-8-22 4 0 4 0 6-2z" fill="#3aa34a"/>
     <path d="M34 52c-14 22-10 50 8 62 12 8 24 6 18-8 16 16 36 10 42-8 8-24-2-52-22-62-8-4-18-2-24 4-6-8-16-8-22 12z" fill="#e23d2d"/>
     <path d="M40 58c6-16 16-22 26-18-12 10-18 24-22 40-8-4-10-12-4-22z" fill="#f08a7a"/>
   </svg>`,
   cake: `<svg viewBox="0 0 120 130" aria-hidden="true">
-    <ellipse cx="60" cy="118" rx="32" ry="6" fill="rgba(58,36,21,0.16)"/>
     <path d="M28 78c0 22 14 34 32 34s32-12 32-34" fill="#f3c4d8"/>
     <path d="M28 78c4 8 10 10 16 8 8-3 10-8 16-8s8 5 16 8c6 2 12 0 16-8" fill="#eea8c4"/>
     <path d="M24 70c8-22 20-34 36-34s28 12 36 34c-10 8-22 12-36 12S34 78 24 70z" fill="#fff7fb"/>
@@ -42,7 +40,6 @@ const SVGS = {
     <path d="M60 24c6-10 14-12 16-8-8 2-12 8-16 14-4-6-6-8-8-10 4 0 6 2 8 4z" fill="#2f9e44"/>
   </svg>`,
   pencil: `<svg viewBox="0 0 120 130" aria-hidden="true">
-    <ellipse cx="60" cy="118" rx="26" ry="6" fill="rgba(58,36,21,0.16)"/>
     <path d="M48 18l24 0 10 80-44 0z" fill="#f2c14e"/>
     <path d="M48 18h24l-2 12h-20z" fill="#d84b4b"/>
     <path d="M44 98l32 0-16 20z" fill="#e7c39a"/>
@@ -50,7 +47,6 @@ const SVGS = {
     <path d="M50 30h20v8h-20z" fill="#e5a82e"/>
   </svg>`,
   ball: `<svg viewBox="0 0 120 130" aria-hidden="true">
-    <ellipse cx="60" cy="118" rx="30" ry="6" fill="rgba(58,36,21,0.16)"/>
     <circle cx="60" cy="64" r="40" fill="#f27a1a"/>
     <path d="M60 24c22 10 32 28 32 40s-10 30-32 40c-22-10-32-28-32-40s10-30 32-40z" fill="none" stroke="#fff" stroke-width="5"/>
     <path d="M28 50h64M28 78h64" fill="none" stroke="#fff" stroke-width="5"/>
@@ -148,13 +144,42 @@ function rowsFor(qIndex) {
   return (q.ops || []).map((op) => ({ type: op === "×" ? "mul" : "div", op }));
 }
 
-function emptyEquations() {
-  return [0, 1, 2, 3].map(() => ["", "", ""]);
+function currentEqIndex(qIndex) {
+  if (qIndex != null) return qIndex;
+  try { return (app && app.qIndex) || 0; } catch (e) { return 0; }
 }
 
+function emptyEquations(qIndex) {
+  const n = Math.max(2, rowsFor(currentEqIndex(qIndex)).length);
+  const rows = [];
+  for (let i = 0; i < n; i++) rows.push(["", "", ""]);
+  return rows;
+}
+
+function normalizeEquations(equations, qIndex) {
+  const n = rowsFor(currentEqIndex(qIndex)).length;
+  const src = Array.isArray(equations) ? equations : [];
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const row = src[i];
+    out.push([
+      String((row && row[0]) || ""),
+      String((row && row[1]) || ""),
+      String((row && row[2]) || "")
+    ]);
+  }
+  return out;
+}
+
+function clampActive(qIndex) {
+  const n = rowsFor(currentEqIndex(qIndex)).length;
+  if (!app.active) app.active = { row: 0, col: 0 };
+  if (app.active.row < 0 || app.active.row >= n) app.active.row = 0;
+  if (app.active.col < 0 || app.active.col > 2) app.active.col = 0;
+}
 
 function svgFor(kind) {
-  return (SVGS[kind] || SVGS.apple) + `<div class="halo"></div>`;
+  return SVGS[kind] || SVGS.apple;
 }
 
 function genRoomCode() {
@@ -757,7 +782,7 @@ function saveSoloWork(qIndex) {
   app.soloWork = app.soloWork || {};
   app.soloWork[String(qIndex)] = {
     loops: overlay ? normalizeLoops(app.loops, overlay) : [],
-    equations: (app.equations || emptyEquations()).map((r) => r.slice()),
+    equations: normalizeEquations(app.equations, qIndex),
     checkResult: app.checkResult,
     submitted: !!app.submitted,
     updatedAt: Date.now()
@@ -799,7 +824,7 @@ function restoreWork(qIndex) {
   if (!rec) return false;
   app.loops = [];
   app.pendingLoops = rec.loops || [];
-  app.equations = (rec.equations || emptyEquations()).map((r) => r.slice());
+  app.equations = normalizeEquations(rec.equations, qIndex);
   app.checkResult = rec.checkResult || null;
   app.submitted = !!rec.submitted;
   app.active = { row: 0, col: 0 };
@@ -832,6 +857,7 @@ function renderQuestion() {
   const items = $("items");
   items.style.gridTemplateColumns = `repeat(${q.cols}, 1fr)`;
   items.style.gridTemplateRows = `repeat(${q.rows}, 1fr)`;
+  items.classList.toggle("grid-dense", q.total >= 20);
   items.innerHTML = "";
   for (let i = 0; i < q.total; i++) {
     const el = document.createElement("div");
@@ -840,6 +866,8 @@ function renderQuestion() {
     el.innerHTML = svgFor(q.kind);
     items.append(el);
   }
+  app.equations = normalizeEquations(app.equations, app.qIndex);
+  clampActive(app.qIndex);
   renderEquations($("equations"), app.equations, app.active, true);
   renderKeys();
   updateCheckButton();
@@ -921,6 +949,8 @@ function renderKeys(rootId) {
 
 function typeInto(ch) {
   if (!isBoardScreenActive()) return;
+  app.equations = normalizeEquations(app.equations, app.qIndex);
+  clampActive(app.qIndex);
   const { row, col } = app.active;
   const cur = app.equations[row][col];
   if (cur.length >= 3 || !/^[0-9]$/.test(ch)) return;
@@ -930,6 +960,8 @@ function typeInto(ch) {
 }
 function backspace() {
   if (!isBoardScreenActive()) return;
+  app.equations = normalizeEquations(app.equations, app.qIndex);
+  clampActive(app.qIndex);
   const { row, col } = app.active;
   app.equations[row][col] = app.equations[row][col].slice(0, -1);
   renderEquations($(boardIds().equations), app.equations, app.active, true);
@@ -1045,19 +1077,45 @@ function renderLoopTools() {
   });
 }
 
-function itemCenters(itemsId, overlayId) {
-  const overlay = $(overlayId);
+function clientToOverlay(clientX, clientY, overlay) {
   const rect = overlay.getBoundingClientRect();
   const vbW = overlay.viewBox.baseVal.width || rect.width || 1;
   const vbH = overlay.viewBox.baseVal.height || rect.height || 1;
-  return [...document.querySelectorAll("#" + itemsId + " .item")].map((el) => {
-    const r = el.getBoundingClientRect();
-    return {
-      el,
-      x: ((r.left + r.width / 2) - rect.left) * (vbW / rect.width),
-      y: ((r.top + r.height / 2) - rect.top) * (vbH / rect.height)
-    };
-  });
+  const w = Math.max(rect.width, 1e-6);
+  const h = Math.max(rect.height, 1e-6);
+  return {
+    x: (clientX - rect.left) * (vbW / w),
+    y: (clientY - rect.top) * (vbH / h)
+  };
+}
+
+function artworkCorners(el, overlay) {
+  const svg = el.querySelector("svg");
+  if (svg) {
+    let bbox = null;
+    try { bbox = svg.getBBox(); } catch (e) { bbox = null; }
+    const ctm = svg.getScreenCTM && svg.getScreenCTM();
+    if (bbox && ctm && bbox.width > 0 && bbox.height > 0) {
+      return [
+        [bbox.x, bbox.y],
+        [bbox.x + bbox.width, bbox.y],
+        [bbox.x, bbox.y + bbox.height],
+        [bbox.x + bbox.width, bbox.y + bbox.height]
+      ].map(([x, y]) => {
+        const p = svg.createSVGPoint();
+        p.x = x; p.y = y;
+        const s = p.matrixTransform(ctm);
+        return clientToOverlay(s.x, s.y, overlay);
+      });
+    }
+    const r = svg.getBoundingClientRect();
+    if (r.width > 2 && r.height > 2) {
+      return [
+        [r.left, r.top], [r.right, r.top], [r.left, r.bottom], [r.right, r.bottom]
+      ].map(([x, y]) => clientToOverlay(x, y, overlay));
+    }
+  }
+  return [];
 }
 
 function insideLoop(px, py, loop) {
@@ -1066,20 +1124,36 @@ function insideLoop(px, py, loop) {
   return dx * dx + dy * dy <= 1;
 }
 
+function itemInsideLoop(el, overlay, loop) {
+  const pts = artworkCorners(el, overlay);
+  return pts.length > 0 && pts.every((p) => insideLoop(p.x, p.y, loop));
+}
+
+function itemCenters(itemsId, overlayId) {
+  const overlay = $(overlayId);
+  return [...document.querySelectorAll("#" + itemsId + " .item")].map((el) => {
+    const pts = artworkCorners(el, overlay);
+    if (!pts.length) return { el, x: 0, y: 0, pts: [] };
+    const x = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const y = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    return { el, x, y, pts };
+  });
+}
+
 function colorItems(itemsId, overlayId, loops) {
-  itemCenters(itemsId, overlayId).forEach(({ el, x, y }) => {
-    const hit = [...loops].reverse().find((loop) => insideLoop(x, y, loop));
+  const overlay = $(overlayId);
+  [...document.querySelectorAll("#" + itemsId + " .item")].forEach((el) => {
+    const hit = [...loops].reverse().find((loop) => itemInsideLoop(el, overlay, loop));
     el.classList.toggle("in-loop", !!hit);
-    const halo = el.querySelector(".halo");
-    if (halo) halo.style.background = hit ? hit.color : "transparent";
   });
 }
 
 function groupSummary(itemsId, overlayId, loops, qIndex) {
   const q = QUESTIONS[qIndex == null ? app.qIndex : qIndex];
   const loopsUse = loops || app.loops;
-  const centers = itemCenters(itemsId || "items", overlayId || "overlay");
-  const counts = loopsUse.map((loop) => centers.filter(({ x, y }) => insideLoop(x, y, loop)).length);
+  const overlay = $(overlayId || "overlay");
+  const items = [...document.querySelectorAll("#" + (itemsId || "items") + " .item")];
+  const counts = loopsUse.map((loop) => items.filter((el) => itemInsideLoop(el, overlay, loop)).length);
   const positive = counts.filter((n) => n > 0);
   const grouped = positive.reduce((a, b) => a + b, 0);
   const uniqueLoops = positive.length;
@@ -1184,9 +1258,11 @@ function onTouchMove(e) {
 }
 
 function parseRowFrom(equations, i, qIndex) {
+  const slots = rowsFor(qIndex);
+  if (!slots[i] || !equations || !equations[i]) return null;
   const [a, b, c] = equations[i].map((v) => Number(v));
   if (!a || !b || !c) return null;
-  return { type: rowsFor(qIndex)[i].type, a, b, c };
+  return { type: slots[i].type, a, b, c };
 }
 function expectedFacts(groups, perGroup, total) {
   return [
@@ -1245,33 +1321,51 @@ function familyKeyFromRow(row, total) {
   return familyKey(row.b, row.c);
 }
 
+function familyFacts(a, b, total) {
+  const uniq = (arr) => {
+    const out = [];
+    arr.forEach((f) => {
+      if (!out.some((x) => sameFact(x, f))) out.push(f);
+    });
+    return out;
+  };
+  return {
+    mul: uniq([
+      { type: "mul", a: a, b: b, c: total },
+      { type: "mul", a: b, b: a, c: total }
+    ]),
+    div: uniq([
+      { type: "div", a: total, b: a, c: b },
+      { type: "div", a: total, b: b, c: a }
+    ])
+  };
+}
+
 function referenceAnswersText(qIndex) {
   const total = QUESTIONS[qIndex].total;
-  const families = factorPairs(total).map(([a, b]) =>
-    expectedFactsInSlotOrder(qIndex, a, b, total).map(formatFact).join("　")
-  );
-  return "參考答案（以下任何一組完整算式家庭均可）：" + families.join(" ／ ");
+  const slots = rowsFor(qIndex);
+  const combos = [];
+  factorPairs(total).forEach(([a, b]) => {
+    const fam = familyFacts(a, b, total);
+    fam.mul.forEach((m) => {
+      fam.div.forEach((d) => {
+        combos.push(slots.map((row) => formatFact(row.type === "mul" ? m : d)).join("　"));
+      });
+    });
+  });
+  return "參考答案（以下任何一組完整算式家庭均可）：" + combos.join(" ／ ");
 }
 
 function evaluateWork(equations, g, qIndex) {
   if (qIndex == null) qIndex = app.qIndex;
   const total = QUESTIONS[qIndex].total;
-  const got = [0, 1, 2, 3].map((i) => parseRowFrom(equations, i, qIndex));
+  const slots = rowsFor(qIndex);
+  const got = slots.map((_, i) => parseRowFrom(equations, i, qIndex));
   if (got.some((row) => !row)) return "incomplete";
   if (got.some((row) => !isValidFactForTotal(row, total))) return "incorrect";
   const keys = got.map((row) => familyKeyFromRow(row, total));
   if (new Set(keys).size !== 1) return "incorrect";
-  const parts = keys[0].split("x").map(Number);
-  const expected = expectedFacts(parts[0], parts[1], total);
-  const used = new Set();
-  let allMatch = true;
-  got.forEach((row) => {
-    const idx = expected.findIndex((ans, j) => !used.has(j) && sameFact(ans, row));
-    if (idx >= 0) used.add(idx);
-    else allMatch = false;
-  });
-  if (allMatch && used.size === 4) return "correct";
-  return "incorrect";
+  return "correct";
 }
 
 function paintEquationGrades(root, equations, g, qIndex) {
@@ -1332,13 +1426,13 @@ function checkAnswers() {
 function applyFeedback(el, result, g) {
   if (result === "correct") {
     el.className = "feedback ok";
-    el.textContent = "正確！這四條就是這組乘除算式家庭。";
+    el.textContent = "正確！這兩條就是同一組因數的乘法和除法。";
   } else if (result === "incorrect") {
     el.className = "feedback bad";
-    el.textContent = "尚未完全正確。請寫出同一組因數的兩條乘法和兩條除法。";
+    el.textContent = "尚未完全正確。請寫出同一組因數的一條乘法和一條除法。";
   } else if (result === "incomplete") {
     el.className = "feedback bad";
-    el.textContent = "請先填齊四條算式（兩條乘法、兩條除法）。";
+    el.textContent = "請先填齊兩條算式（一條乘法、一條除法）。";
   } else {
     el.className = "feedback";
     el.textContent = "";
@@ -1361,7 +1455,7 @@ function buildStudentWork(lastEvent) {
   const overlay = $("overlay");
   const rec = {
     loops: overlay ? normalizeLoops(app.loops, overlay) : [],
-    equations: app.equations.map((r) => r.slice()),
+    equations: normalizeEquations(app.equations, app.qIndex),
     groupSummary: groupSummary(),
     checkResult: app.checkResult,
     submitted: !!app.submitted,
@@ -1580,6 +1674,22 @@ function renderConsole() {
   $("btn-next-q").disabled = app.cloud.unlockedQuestion >= 3;
   $("btn-prev-q").disabled = app.cloud.unlockedQuestion <= 0;
   $("btn-reveal").textContent = app.cloud.reveal ? "隱藏答案" : "顯示答案";
+  const bcast = app.cloud.broadcast;
+  const bBadge = $("console-broadcast-badge");
+  const bBtn = $("btn-console-cancel-broadcast");
+  if (bBadge && bBtn) {
+    if (bcast && bcast.studentNo != null) {
+      bBadge.classList.remove("hidden");
+      bBadge.textContent = "正在廣播：學號 " + bcast.studentNo + "　第 " + ((Number(bcast.questionIndex) || 0) + 1) + " 題";
+      bBtn.classList.remove("hidden");
+      bBtn.disabled = false;
+    } else {
+      bBadge.classList.add("hidden");
+      bBadge.textContent = "";
+      bBtn.classList.add("hidden");
+      bBtn.disabled = true;
+    }
+  }
   updateTeacherSync();
 
   const names = $("teacher-online-names");
@@ -1647,7 +1757,8 @@ function renderStaticScene(prefix, qIndex, rec, opts) {
     el.innerHTML = svgFor(q.kind);
     items.append(el);
   }
-  const equations = (rec && rec.equations) || emptyEquations();
+  items.classList.toggle("grid-dense", q.total >= 20);
+  const equations = normalizeEquations(rec && rec.equations, qIndex);
   renderEquations($(prefix + "-equations"), equations, null, false, qIndex);
   requestAnimationFrame(() => {
     syncOverlayBox(overlay);
@@ -1720,7 +1831,7 @@ function teacherBroadcast() {
     studentNo: app.inspectNo,
     questionIndex: app.inspectQ,
     loops: rec ? rec.loops : [],
-    equations: rec ? rec.equations : emptyEquations(),
+    equations: rec ? normalizeEquations(rec.equations, app.inspectQ) : emptyEquations(app.inspectQ),
     groupSummary: rec ? rec.groupSummary : null,
     checkResult: rec ? rec.checkResult : null
   };
@@ -1730,7 +1841,8 @@ function teacherBroadcast() {
 function teacherCancelBroadcast() {
   app.cloud.broadcast = null;
   teacherPublishState();
-  renderInspect();
+  if ($("screen-inspect") && $("screen-inspect").classList.contains("active")) renderInspect();
+  else renderConsole();
 }
 function toggleReveal() {
   app.cloud.reveal = !app.cloud.reveal;
@@ -1762,7 +1874,7 @@ function saveDemoBoard() {
   const q = app.demoQ != null ? app.demoQ : app.qIndex;
   app.demoWork[String(q)] = {
     loops: overlay ? normalizeLoops(app.loops, overlay) : (app.pendingLoops || []),
-    equations: (app.equations || emptyEquations()).map((r) => r.slice())
+    equations: normalizeEquations(app.equations, q)
   };
 }
 
@@ -1805,12 +1917,12 @@ function renderTeacherDemo() {
     if (rec) {
       app.loops = [];
       app.pendingLoops = rec.loops || [];
-      app.equations = (rec.equations || emptyEquations()).map((r) => r.slice());
+      app.equations = normalizeEquations(rec.equations, app.qIndex);
       app.active = { row: 0, col: 0 };
     } else {
       app.loops = [];
       app.pendingLoops = null;
-      app.equations = emptyEquations();
+      app.equations = emptyEquations(app.qIndex);
       app.active = { row: 0, col: 0 };
     }
   } else {
@@ -1826,6 +1938,7 @@ function renderTeacherDemo() {
   const items = $("demo-items");
   items.style.gridTemplateColumns = `repeat(${q.cols}, 1fr)`;
   items.style.gridTemplateRows = `repeat(${q.rows}, 1fr)`;
+  items.classList.toggle("grid-dense", q.total >= 20);
   items.innerHTML = "";
   for (let i = 0; i < q.total; i++) {
     const el = document.createElement("div");
@@ -1834,6 +1947,8 @@ function renderTeacherDemo() {
     el.innerHTML = svgFor(q.kind);
     items.append(el);
   }
+  app.equations = normalizeEquations(app.equations, app.qIndex);
+  clampActive(app.qIndex);
   renderEquations($("demo-equations"), app.equations, app.active, true);
   renderKeys("demo-numkeys");
   const applyDemoLoops = () => {
@@ -1888,25 +2003,33 @@ function toggleDemoProject() {
   requestAnimationFrame(() => renderLoops());
 }
 
-function exportData() {
-  if (!app.cloud) return;
-  const rows = [["學號","題號","物件","總數","組數","每組","分組是否完成","算式1","算式2","算式3","算式4","結果","更新時間"]];
+function exportTable(cloud) {
+  const rows = [["學號","題號","物件","總數","組數","每組","分組是否完成","算式1","算式2","結果","更新時間"]];
+  if (!cloud) return rows;
   for (let n = 1; n <= CLASS_SIZE; n++) {
-    const work = app.cloud.studentWork[String(n)];
+    const work = cloud.studentWork && cloud.studentWork[String(n)];
     if (!work) continue;
     for (let q = 0; q < 4; q++) {
       const rec = work.questions && work.questions[String(q)];
       if (!rec) continue;
       const g = rec.groupSummary || {};
-      const eq = (rec.equations || []).map((r, i) => {
+      const slots = rowsFor(q);
+      const eq = slots.map((slot, i) => {
+        const r = (rec.equations || [])[i];
         const a = (r && r[0]) || "", b = (r && r[1]) || "", c = (r && r[2]) || "";
         if (!a && !b && !c) return "";
-        return `${a}${rowsFor(q)[i].op}${b}=${c}`;
+        return `${a}${slot.op}${b}=${c}`;
       });
       const t = rec.updatedAt ? new Date(rec.updatedAt).toLocaleString("zh-HK", { hour12: false }) : "";
-      rows.push([n, q + 1, QUESTIONS[q].kindName, QUESTIONS[q].total, g.groups || "", g.perGroup || "", g.allGrouped ? "是" : "否", eq[0] || "", eq[1] || "", eq[2] || "", eq[3] || "", resultLabel(rec.checkResult, rec.submitted), t]);
+      rows.push([n, q + 1, QUESTIONS[q].kindName, QUESTIONS[q].total, g.groups || "", g.perGroup || "", g.allGrouped ? "是" : "否", eq[0] || "", eq[1] || "", resultLabel(rec.checkResult, rec.submitted), t]);
     }
   }
+  return rows;
+}
+
+function exportData() {
+  if (!app.cloud) return;
+  const rows = exportTable(app.cloud);
   const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
@@ -1975,6 +2098,7 @@ function bind() {
   $("btn-demo-back").addEventListener("click", leaveTeacherDemo);
   $("btn-broadcast").addEventListener("click", teacherBroadcast);
   $("btn-cancel-broadcast").addEventListener("click", teacherCancelBroadcast);
+  $("btn-console-cancel-broadcast").addEventListener("click", teacherCancelBroadcast);
   $("btn-inspect-reveal").addEventListener("click", toggleReveal);
   $("btn-inspect-back").addEventListener("click", enterConsole);
 
@@ -2010,8 +2134,9 @@ function bind() {
     if (e.key >= "0" && e.key <= "9") { typeInto(e.key); e.preventDefault(); }
     else if (e.key === "Backspace") { backspace(); e.preventDefault(); }
     else if (e.key === "Enter" || e.key === "Tab" || e.key === "ArrowRight") {
+      const slots = rowsFor(app.qIndex).length * 3;
       const i = app.active.row * 3 + app.active.col + 1;
-      app.active = { row: Math.floor((i % 12) / 3), col: i % 3 };
+      app.active = { row: Math.floor((i % slots) / 3), col: i % 3 };
       renderEquations($(boardIds().equations), app.equations, app.active, true);
       e.preventDefault();
     }
